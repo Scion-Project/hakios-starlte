@@ -3,6 +3,14 @@
 HakiOS on the Galaxy S9 the way it runs on the POCO: the phone's boot loader starts a UEFI, the UEFI starts `xnuloader`, the
 loader starts XNU. Nothing of Android's virtualization is involved (that is the Pixel's route, `avf/`).
 
+**The repository.** This is the S9's device repository: its configuration, its SoC layer (`soc/`), its UEFI platform and
+the UEFI built from it (`uefi/`, `prebuilt/`), and the image script. It is checked out at `devices/starlte` of the kernel's
+common repository, [Scion-Project/hackios-xnu-kernel](https://github.com/Scion-Project/hackios-xnu-kernel), which names it in
+`devices/manifest.conf` at a revision (`tools/hakios-device.py sync starlte`). The S9's drivers are in the common
+repository, as the POCO's are: `drivers/core/hakios.exynos_hsi2c.c`, `drivers/input/hakios.exynos_keys.c` and
+`hakios.s6sy761.c`, `drivers/power/hakios.max77705.c`, `drivers/gpu/hakios.s6e3ha8.c` and `hakios.mali.c`/`.cpp`; and so
+are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
+
 **State: written, not yet run on the phone.** The kernel's and loader's half is tested in QEMU with the same interrupt
 controller (`qemu/run.sh` with `QEMU_GIC=2`). What is known and what is not is below; `device.conf` is the record.
 
