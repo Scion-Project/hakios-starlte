@@ -98,7 +98,7 @@ the big cores first, and leaves core 0 to the loader, which is also what the sto
 ```sh
 make starlte_defconfig && make kernel        # the common kernel, no driver of another phone (configs/starlte.config)
 make loader                                  # with the iPhone identity from your own IPSW
-(source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 bash build.sh)   # the small root with Mesa (panfrost) in it
+(source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 bash build.sh)   # the small root, the whole root here (ALONE=1)
 devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root
 devices/starlte/mkimage.sh -s 300 cpus=8 bootcpu=4 exynos_keys=1     # the same with other boot-arguments
 ```
@@ -118,8 +118,10 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
 3. Flash the image to **BOOT** and keep TWRP in RECOVERY, as the WoA port for the S9+ does: TWRP is where the log is
    read after a run and where Android is put back. From TWRP: `adb push xnu-starlte.img /sdcard/`, then Install, Install
    Image, Boot (or `heimdall flash --BOOT xnu-starlte.img` from Download mode).
-4. Power on: HakiOS starts. A run restarts the phone when it ends; go straight into TWRP with Vol Up + Bixby + Power
-   to read its log. Android back: restore the BOOT backup in TWRP.
+4. Power on: HakiOS starts. A run restarts the phone into recovery when it ends (the loader sets the reset reason
+   S-Boot reads, PMU INFORM3 = 0x12345674, as Android's `reboot recovery` does; `recovery=0` turns it off), so TWRP
+   comes up with the log still in RAM. If the phone hangs instead, hold Vol Down + Power until it restarts, then at
+   once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
 
 The default command line (`cpus=4 bootcpu=1 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 1-3 and leaves
 core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
