@@ -44,4 +44,5 @@ python3 xnuloader/mkpayload.py -o "$P" loader.efi="$L" kernel="$K" ramdisk="$RD"
 	--cmdline "loader_return_after=$SECS epoch=$(date +%s) $ARGS" >/dev/null
 UEFI_TARGET=starlte python3 mkxnuimg.py -p "$P" -o "$OUT"
 echo "mkimage.sh: $OUT: in TWRP, adb push it to /sdcard and Install Image to Boot (or heimdall flash --BOOT $OUT); power on"
-echo "mkimage.sh: boot-args: $ARGS; the run returns after $SECS s"
+if [ "$SECS" = 0 ]; then LIMIT="no time limit"; else LIMIT="the run returns after $SECS s"; fi
+echo "mkimage.sh: boot-args: $ARGS; $LIMIT"

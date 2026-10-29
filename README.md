@@ -142,6 +142,13 @@ lays the zones out differently: `cat /sys/module/ramoops/parameters/*` and the `
 
 ## Storage: iOS from the phone's flash
 
+**The installer:** [Scion-Project/scion-packaging](https://github.com/Scion-Project/scion-packaging) `starlte/mkinstaller.sh`
+makes one TWRP zip. It writes the boot image (`-s 0`, `ufs=2 system_apfs=ufs_SYSTEM`) to BOOT and `userland/system.apfs`
+to SYSTEM, then checks both by SHA-256. On boot, init mounts the system image from `/dev/ufs_SYSTEM` and makes it the
+root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to SpringBoard (GICv2, 4 GB, a GPT
+partition read through the loader). The small root for it is built with `ALONE=1 RC=rc.launchd`.
+
+
 There is no Exynos UFS driver in the kernel, and none is needed for reading. Silicium's UEFI drives the UFS and stays
 resident. With `ufs=2 bootcpu=4 cpus=8`, the loader keeps core 0 and reads for the kernel, which runs on the other seven: the same
 service the POCO uses (`drivers/storage/hakios.ufs.c`). Every GPT partition becomes `/dev/ufs_NAME`, read-only, and
