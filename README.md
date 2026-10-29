@@ -185,6 +185,13 @@ its page tables, 9 HakiosMali for programs). With 9, `/redwood/bin/mali_test` (r
 without Mesa, and the window server draws with OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with
 `GL=1`). Go up one step a run: `mkimage.sh cpus=4 bootcpu=1 mali=1 ...`.
 
+## Vibration and the flashlight
+
+`max77705_haptic=1` gives iOS the vibration motor: the MAX77705's haptic block (the same chip as the charger: two of
+its registers written, in their haptic bits only, each read back) driven by channel 1 of the SoC's PWM, as Samsung's
+driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
+restart puts it out; never above Android's 60 mA). Both are off on the default command line until seen working.
+
 ## What comes next
 
 | Step | How |
