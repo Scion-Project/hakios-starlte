@@ -17,8 +17,8 @@ controller (`qemu/run.sh` with `QEMU_GIC=2`). What is known and what is not is b
 ## How it starts
 
 ```
-S-Boot (Samsung's, unlocked)  -->  boot image on RECOVERY  -->  HakiOS UEFI                    -->  xnuloader  -->  XNU (EL1)
-  Vol Up + Bixby + Power            BootShim + FD + XNUP         Mu-Silicium's starltePkg,           (platform        GIC-400, 4 x A55,
+S-Boot (Samsung's, unlocked)  -->  boot image on BOOT      -->  HakiOS UEFI                    -->  xnuloader  -->  XNU (EL1)
+  power on                          BootShim + FD + XNUP         Mu-Silicium's starltePkg,           (platform        GIC-400, 4 x A55,
                                                                  Carbon Hypervisor at EL2 (PSCI),    "starlte")       UEFI's framebuffer
                                                                  the panel's buffer as GOP
 ```
@@ -91,10 +91,11 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
 
 1. Make sure the bootloader really is unlocked: Download mode (Vol Down + Bixby, then plug in USB) shows `OEM LOCK: OFF`.
 2. In TWRP, or with root, back up `EFS` (the IMEI: losing it is permanent), `BOOT` and `RECOVERY` to the computer.
-3. Flash the image to **RECOVERY**, not BOOT, so Android stays bootable: `heimdall flash --RECOVERY xnu-starlte.img`, or
-   Odin with the image in a tar, or TWRP's "Install Image" to Recovery.
-4. Start it with Vol Up + Bixby + Power, held until the screen comes on. Back to Android: hold Vol Down + Power to restart.
-   Flash TWRP back to RECOVERY when done.
+3. Flash the image to **BOOT** and keep TWRP in RECOVERY, as the WoA port for the S9+ does: TWRP is where the log is
+   read after a run and where Android is put back. From TWRP: `adb push xnu-starlte.img /sdcard/`, then Install, Install
+   Image, Boot (or `heimdall flash --BOOT xnu-starlte.img` from Download mode).
+4. Power on: HakiOS starts. A run restarts the phone when it ends; go straight into TWRP with Vol Up + Bixby + Power
+   to read its log. Android back: restore the BOOT backup in TWRP.
 
 The default command line (`cpus=4 bootcpu=1 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 1-3 and leaves
 core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
@@ -103,7 +104,7 @@ the phone, so a hang leaves something to read. `-v` shows the kernel's log on th
 What to look for, in this order:
 1. HakiOS's logo (the UEFI started).
 2. The loader's banner, with `platform starlte, GICv2` and `CurrentEL=1` (Carbon has EL2).
-3. The kernel's log, `gic: v2 ... cpu 0 is interface 0`, `4 of 4 processors are running`.
+3. The kernel's log, `gic: v2 ... cpu 0 is interface 1` (the kernel starts on core 1), `3 of 3 processors are running`.
 4. launchd.
 
 Photograph the screen as well. The loader's `logdump` is a Qualcomm partition, and this phone has none. Instead, the

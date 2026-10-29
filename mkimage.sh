@@ -2,7 +2,7 @@
 # The Galaxy S9's boot image for one run: the boot shim, HakiOS's UEFI for starlte (prebuilt/ or a Mu-Silicium/ built
 # here) and a payload with everything in it -- the loader, the kernel, the small root image, the command line. Samsung's
 # boot loader has no fastboot and Silicium's UEFI no USB gadget, so there is no resident loader to send runs to as on the
-# POCO: every run is an image flashed to RECOVERY (README.md, "On the phone"). The run ends by itself after SECS seconds
+# POCO: every run is an image flashed to BOOT, TWRP kept in RECOVERY (README.md, "On the phone"). The run ends by itself after SECS seconds
 # (loader_return_after=): the loader keeps the log in Samsung's pstore RAM and restarts the phone.
 #
 #   devices/starlte/mkimage.sh [-o xnu-starlte.img] [-k kernel] [-r root.apfs] [-s SECS] [-q] [boot-args...]
@@ -43,5 +43,5 @@ trap 'rm -f "$P"' EXIT
 python3 xnuloader/mkpayload.py -o "$P" loader.efi="$L" kernel="$K" ramdisk="$RD" \
 	--cmdline "loader_return_after=$SECS epoch=$(date +%s) $ARGS" >/dev/null
 UEFI_TARGET=starlte python3 mkxnuimg.py -p "$P" -o "$OUT"
-echo "mkimage.sh: $OUT: flash it to RECOVERY (heimdall flash --RECOVERY $OUT), start with Vol Up + Bixby + Power"
+echo "mkimage.sh: $OUT: in TWRP, adb push it to /sdcard and Install Image to Boot (or heimdall flash --BOOT $OUT); power on"
 echo "mkimage.sh: boot-args: $ARGS; the run returns after $SECS s"
