@@ -40,7 +40,7 @@ env:
   THEOS: /mnt/w/theos
   TOOLCHAIN_URL: https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz
   SDKS_REPO: https://github.com/theos/sdks.git
-  SEVENZIP_URL: https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
+  SEVENZIP_URL: https://github.com/ip7z/7zip/releases/download/24.08/7z2408-linux-x64.tar.xz
   IPSW_DEVICE: iPhone10,3
   IPSW_BUILD: 20F66
   IPSW_SIZE: "6165698198"
