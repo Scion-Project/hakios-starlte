@@ -12,9 +12,10 @@
 # with no other way to show it while it runs) unless -q. The loader is xnuloader/loader.efi, built with the
 # iPhone identity from your own IPSW (make loader): the image is yours, never to be published.
 set -e
+START=$PWD
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-OUT=xnu-starlte.img K=hakios-kernel RD=userland/root.apfs SECS=120 VERBOSE=-v
+OUT=$ROOT/xnu-starlte.img K=$ROOT/hakios-kernel RD=$ROOT/userland/root.apfs SECS=120 VERBOSE=-v
 while getopts o:k:r:s:q opt; do
 	case $opt in
 	o) OUT=$OPTARG ;; k) K=$OPTARG ;; r) RD=$OPTARG ;; s) SECS=$OPTARG ;; q) VERBOSE= ;;
@@ -22,12 +23,20 @@ while getopts o:k:r:s:q opt; do
 	esac
 done
 shift $((OPTIND - 1))
+# (-o, -k and -r as given, from where this was run, before the cd below took effect for them)
+abs() { case "$1" in /*) echo "$1" ;; *) echo "$START/$1" ;; esac; }
+OUT=$(abs "$OUT") K=$(abs "$K") RD=$(abs "$RD")
 L=xnuloader/loader.efi
 for f in "$L" "$K" "$RD"; do
 	[ -f "$f" ] || { echo "mkimage.sh: $f is missing (make loader, make kernel, userland/build.sh)" >&2; exit 1; }
 done
 ARGS="$*"
-[ -n "$ARGS" ] || ARGS=$(python3 tools/hakios-config.py args)
+if [ -z "$ARGS" ]; then
+	# the arguments of the configuration made here, which must be this phone's (make starlte_defconfig)
+	grep -q '^CONFIG_DEVICE="starlte"' .config 2>/dev/null || {
+		echo "mkimage.sh: .config is not the S9's: make starlte_defconfig first, or give the boot-arguments" >&2; exit 1; }
+	ARGS=$(python3 tools/hakios-config.py args)
+fi
 ARGS="${VERBOSE:+$VERBOSE }$ARGS"
 P=$(mktemp "${TMPDIR:-/tmp}/starlte-payload.XXXXXX")
 trap 'rm -f "$P"' EXIT
