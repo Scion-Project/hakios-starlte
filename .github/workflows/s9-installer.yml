@@ -1,0 +1,238 @@
+# The Galaxy S9's TWRP installer, built from nothing in one job (Actions > s9-installer > Run workflow).
+#
+# The job:
+#   1. downloads iOS 16.5 (20F66) for iPhone10,3 from Apple's CDN, checked by size and hash;
+#   2. unpacks it (sysimage/unpack.sh) and builds the loader's iPhone identity (xnuloader/mkidentity.sh);
+#   3. builds the S9 kernel, the loader, Mesa, the small root (ALONE=1 RC=rc.launchd) and the system image;
+#   4. makes the installer (Scion-Project/scion-packaging starlte/mkinstaller.sh): Scion's boot image to BOOT,
+#      the system image to the partition given (SYSTEM).
+#
+# The installer carries iOS's own files. This repository is public, and any signed-in GitHub user can download
+# a public repository's artifacts. So the job uploads one 7z archive, AES-256 with its file names encrypted, with
+# the passphrase of the repository secret INSTALLER_PASSPHRASE. Without the secret the job stops before it
+# builds anything. Inside the archive: the installer zip exactly as TWRP flashes it, its SHA256SUMS and a README.
+# Before uploading, the job decrypts its own archive and checks the zip. Artifacts are kept for 3 days.
+name: s9-installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      kernel_ref:
+        description: Scion-Project/hackios-xnu-kernel branch, tag or commit
+        default: main
+      packaging_ref:
+        description: Scion-Project/scion-packaging branch, tag or commit
+        default: main
+      partition:
+        description: The partition the iOS system image is written to
+        default: SYSTEM
+      boot_args:
+        description: Extra boot-arguments (for example mali=9, or abox=8 max98512=3)
+        default: ""
+
+concurrency:
+  group: s9-installer
+  cancel-in-progress: false
+
+env:
+  # everything big lives on /mnt: GitHub's Ubuntu runners have about 14 GB free on / and about 70 GB there
+  W: /mnt/w
+  THEOS: /mnt/w/theos
+  TOOLCHAIN_URL: https://github.com/L1ghtmann/llvm-project/releases/latest/download/iOSToolchain-x86_64.tar.xz
+  SDKS_REPO: https://github.com/theos/sdks.git
+  SEVENZIP_URL: https://www.7-zip.org/a/7z2408-linux-x64.tar.xz
+  IPSW_DEVICE: iPhone10,3
+  IPSW_BUILD: 20F66
+  IPSW_SIZE: "6165698198"
+
+jobs:
+  installer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - name: The passphrase is set
+        env:
+          PASS: ${{ secrets.INSTALLER_PASSPHRASE }}
+        run: |
+          [ -n "$PASS" ] || { echo "::error::set the repository secret INSTALLER_PASSPHRASE: the installer is never uploaded unencrypted"; exit 1; }
+
+      - name: Work space on /mnt
+        run: |
+          sudo mkdir -p "$W/bin" && sudo chown -R "$(id -u):$(id -g)" "$W"
+          echo "$W/bin" >> "$GITHUB_PATH"
+          df -h / /mnt
+
+      - name: Host packages, and 7-Zip 24 (unpack.sh reads APFS with it; Ubuntu's p7zip is 16)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q --no-install-recommends build-essential git curl clang lld \
+            python3 python3-venv perl xz-utils flex bison m4 autoconf automake libtool-bin uuid-dev llvm \
+            meson ninja-build pkg-config
+          curl -L --fail --retry 3 -s "$SEVENZIP_URL" | tar -xJ -C "$W/bin" 7zz
+          ln -sf 7zz "$W/bin/7z"
+          "$W/bin/7z" i | sed -n 2p
+
+      - name: Sources (the kernel repository, this device repository inside it, scion-packaging)
+        env:
+          KERNEL_REF: ${{ inputs.kernel_ref }}
+          PACKAGING_REF: ${{ inputs.packaging_ref }}
+        run: |
+          git clone -q --filter=blob:none https://github.com/Scion-Project/hackios-xnu-kernel.git "$W/k"
+          git -C "$W/k" checkout -q "$KERNEL_REF"
+          git clone -q --filter=blob:none https://github.com/Scion-Project/scion-packaging.git "$W/pkg"
+          git -C "$W/pkg" checkout -q "$PACKAGING_REF"
+          # this run's own commit of the device repository, where tools/hakios-device.py sync would put it
+          git clone -q --filter=blob:none "https://github.com/$GITHUB_REPOSITORY.git" "$W/k/devices/starlte"
+          git -C "$W/k/devices/starlte" checkout -q "$GITHUB_SHA"
+          for r in "$W/k" "$W/k/devices/starlte" "$W/pkg"; do echo "$r: $(git -C "$r" log --oneline -1)"; done
+          echo "MESA_KEY=$(cd "$W/k" && cat tools/mk-mesa.sh tools/mesa/*.patch tools/mesa/hakios-drm/* | sha256sum | cut -c1-16)" >> "$GITHUB_ENV"
+          echo "DEPS_KEY=$(sha256sum "$W/k/xnu-deps/setup.sh" | cut -c1-16)" >> "$GITHUB_ENV"
+
+      - name: Cache the theos toolchain and SDK
+        id: theos-cache
+        uses: actions/cache@v4
+        with:
+          path: /mnt/w/theos
+          key: theos-iOSToolchain-x86_64-iPhoneOS16.5-v1
+
+      - name: theos (toolchain and iPhoneOS16.5.sdk)
+        if: steps.theos-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$THEOS/toolchain/linux/iphone" "$THEOS/sdks"
+          mkdir -p "$W/tc" && curl -L --fail --retry 3 -s "$TOOLCHAIN_URL" | tar -xJ -C "$W/tc"
+          LD=$(find "$W/tc" -path '*/bin/ld' \( -type f -o -type l \) | head -1)
+          test -n "$LD" || { find "$W/tc" -maxdepth 4 | head -50; exit 1; }
+          rm -rf "$THEOS/toolchain/linux/iphone" && mv "$(dirname "$(dirname "$LD")")" "$THEOS/toolchain/linux/iphone"
+          rm -rf "$W/tc"
+          git init -q "$W/sdks" && git -C "$W/sdks" remote add origin "$SDKS_REPO"
+          git -C "$W/sdks" sparse-checkout set iPhoneOS16.5.sdk
+          git -C "$W/sdks" fetch -q --depth 1 --filter=blob:none origin HEAD && git -C "$W/sdks" checkout -q FETCH_HEAD
+          mv "$W/sdks/iPhoneOS16.5.sdk" "$THEOS/sdks/" && rm -rf "$W/sdks"
+          test -d "$THEOS/sdks/iPhoneOS16.5.sdk/usr/include"
+
+      - name: Cache xnu-deps' sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            /mnt/w/k/xnu-deps/AvailabilityVersions
+            /mnt/w/k/xnu-deps/libdispatch
+            /mnt/w/k/xnu-deps/libpthread
+            /mnt/w/k/xnu-deps/mm_bootstrap_cmds
+            /mnt/w/k/xnu-deps/tcsh
+            /mnt/w/k/xnu-deps/unifdef
+            /mnt/w/k/xnu-deps/MacOSX13.3.sdk
+          key: xnu-deps-src-${{ env.DEPS_KEY }}
+
+      - name: Cache Mesa (built for iOS; keyed on its patches, which is what userland/build.sh checks)
+        uses: actions/cache@v4
+        with:
+          path: /mnt/w/k/xnu-deps/build/mesa/out
+          key: mesa-ios-${{ env.MESA_KEY }}
+
+      - name: The S9's configuration, the kernel tree, the dependencies
+        working-directory: /mnt/w/k
+        run: |
+          make starlte_defconfig
+          xnu/apply.sh
+          xnu-deps/setup.sh || { for f in xnu-deps/*.log; do echo "== $f"; tail -60 "$f"; done; exit 1; }
+
+      - name: iOS 16.5 (20F66) for iPhone10,3, from Apple
+        run: |
+          curl -s --fail --retry 3 "https://api.ipsw.me/v4/ipsw/$IPSW_DEVICE/$IPSW_BUILD" > "$W/ipsw.json"
+          URL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["url"])' "$W/ipsw.json")
+          SHA1=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("sha1sum",""))' "$W/ipsw.json")
+          echo "IPSW: $URL"
+          curl -L --fail --retry 5 -s -o "$W/ios.ipsw" "$URL"
+          size=$(stat -c %s "$W/ios.ipsw")
+          [ "$size" = "$IPSW_SIZE" ] || { echo "::error::the IPSW is $size bytes, not $IPSW_SIZE"; exit 1; }
+          if [ -n "$SHA1" ]; then
+            got=$(sha1sum "$W/ios.ipsw" | cut -d' ' -f1)
+            [ "$got" = "$SHA1" ] || { echo "::error::the IPSW's sha1 is $got, not $SHA1"; exit 1; }
+          fi
+          echo "IPSW checked: $size bytes${SHA1:+, sha1 $SHA1}"
+
+      - name: Unpack the IPSW (sysimage/unpack.sh), then the iPhone identity (xnuloader/mkidentity.sh)
+        working-directory: /mnt/w/k
+        run: |
+          sysimage/unpack.sh "$W/ios.ipsw"
+          xnuloader/mkidentity.sh
+          rm -f "$W/ios.ipsw"
+          df -h /mnt
+
+      - name: The S9 kernel
+        working-directory: /mnt/w/k
+        run: |
+          make kernel JOBS=$(nproc) > "$W/kernel.log" 2>&1 || { tail -80 "$W/kernel.log"; exit 1; }
+          K=xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
+          ls -la "$K" && grep -a 'drivers built in' "$W/kernel.log" | tail -1 || true
+          echo "KERNEL=$W/k/$K" >> "$GITHUB_ENV"
+
+      - name: The loader (with the identity)
+        working-directory: /mnt/w/k
+        run: make loader
+
+      - name: The small root and the system image (userland/build.sh; Mesa when the cache did not have it)
+        working-directory: /mnt/w/k
+        run: |
+          (source ./xnu-env.sh && cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 RC=rc.launchd bash build.sh) > "$W/userland.log" 2>&1 ||
+            { tail -100 "$W/userland.log"; exit 1; }
+          tail -5 "$W/userland.log"
+          ls -la userland/root.apfs userland/system.apfs
+
+      - name: The installer (scion-packaging starlte/mkinstaller.sh)
+        env:
+          PARTITION: ${{ inputs.partition }}
+          BOOT_ARGS: ${{ inputs.boot_args }}
+        run: |
+          mkdir -p "$W/out"
+          SCION_KERNEL="$W/k" "$W/pkg/starlte/mkinstaller.sh" -s "$W/k/userland/system.apfs" -k "$KERNEL" \
+            -r "$W/k/userland/root.apfs" -p "$PARTITION" -o "$W/out/scion-starlte-installer.zip" $BOOT_ARGS
+
+      - name: Encrypt it (the installer inside, untouched), and check the archive
+        env:
+          PASS: ${{ secrets.INSTALLER_PASSPHRASE }}
+          PARTITION: ${{ inputs.partition }}
+        run: |
+          P="$W/pack" && mkdir -p "$P"
+          mv "$W/out/scion-starlte-installer.zip" "$P/"
+          (cd "$P" && sha256sum scion-starlte-installer.zip > SHA256SUMS)
+          cat > "$P/README.txt" <<EOF
+          Scion for the Galaxy S9 (SM-G960F), built $(date -u +%Y-%m-%d) by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
+          kernel repo $(git -C "$W/k" rev-parse --short HEAD), device repo ${GITHUB_SHA::7}, system image to $PARTITION
+
+          1. Check the zip: sha256sum -c SHA256SUMS   (or compare with: shasum -a 256 scion-starlte-installer.zip)
+          2. In TWRP, back up Boot, $PARTITION and EFS first and copy the backup off the phone.
+          3. Copy scion-starlte-installer.zip to the phone (or adb sideload it) and flash it: Install > the zip > swipe.
+             Flash this zip as it is: do not unpack it.
+          4. Reboot > System. To leave Scion: five fingers held on the screen for 1.5 s (back to TWRP), or Vol Down + Power.
+          Android back: restore the Boot and $PARTITION backups in TWRP.
+          EOF
+          A="$W/upload/scion-s9-installer.7z" && mkdir -p "$W/upload"
+          (cd "$P" && 7z a -t7z -mx=0 -mhe=on -p"$PASS" "$A" scion-starlte-installer.zip SHA256SUMS README.txt > /dev/null)
+          # the archive opens with the passphrase, and the zip inside is the one made above
+          7z t -p"$PASS" "$A" > /dev/null
+          want=$(cut -d' ' -f1 "$P/SHA256SUMS")
+          got=$(7z x -so -p"$PASS" "$A" scion-starlte-installer.zip | sha256sum | cut -d' ' -f1)
+          [ "$got" = "$want" ] || { echo "::error::the zip inside the archive is not the installer"; exit 1; }
+          rm -rf "$P"
+          ls -la "$A"
+          echo "installer sha256 $want (inside the encrypted archive)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scion-s9-installer
+          path: /mnt/w/upload/scion-s9-installer.7z
+          compression-level: 0
+          retention-days: 3
+
+      - name: Build logs (no Apple files in them)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: s9-installer-logs
+          path: |
+            /mnt/w/kernel.log
+            /mnt/w/userland.log
+            /mnt/w/k/xnu-deps/*.log
+          retention-days: 7
+          if-no-files-found: ignore

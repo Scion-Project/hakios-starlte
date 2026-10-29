@@ -140,6 +140,27 @@ which a restart leaves alone. Restart into TWRP or Android (Vol Down + Power) an
 lays the zones out differently: `cat /sys/module/ramoops/parameters/*` and the `log_pstore` node say how, and
 `platform_starlte.ram_log` in `xnuloader/loader.c` is the one number to change.
 
+## Building in CI: the installer in one click
+
+Actions > **s9-installer** > Run workflow (`.github/workflows/s9-installer.yml`). One job, about two hours on GitHub's
+Ubuntu runner:
+1. It downloads iOS 16.5 (20F66) for iPhone10,3 from Apple's CDN, checked by size and hash, and unpacks it.
+2. It builds the S9 kernel, the loader with the iPhone identity, Mesa, the small root and the system image.
+3. It makes the TWRP installer (scion-packaging), with the system image going to SYSTEM unless the run says
+   otherwise.
+
+The artifact `scion-s9-installer` is a 7z archive, AES-256 with its file names hidden. Its passphrase is the
+repository secret `INSTALLER_PASSPHRASE`, and the job refuses to run without it. The installer carries iOS's own
+files, and anyone signed in to GitHub can download a public repository's artifacts. Artifacts are kept for 3 days.
+
+To use it:
+1. Download the artifact.
+2. Open the archive with the passphrase (`7zz x scion-s9-installer.7z`, or Keka / 7-Zip).
+3. Check `SHA256SUMS`.
+4. Flash `scion-starlte-installer.zip` from TWRP as it is.
+
+The run's inputs: the kernel and packaging refs, the partition, and extra boot-arguments.
+
 ## Storage: iOS from the phone's flash
 
 **The installer:** [Scion-Project/scion-packaging](https://github.com/Scion-Project/scion-packaging) `starlte/mkinstaller.sh`
