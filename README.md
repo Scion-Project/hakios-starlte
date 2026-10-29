@@ -75,6 +75,7 @@ the big cores first, and leaves core 0 to the loader, which is also what the sto
 ```sh
 make starlte_defconfig && make kernel        # the common kernel, no driver of another phone (configs/starlte.config)
 make loader                                  # with the iPhone identity from your own IPSW
+(source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 bash build.sh)   # the small root with Mesa (panfrost) in it
 devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root
 devices/starlte/mkimage.sh -s 300 cpus=8 bootcpu=4 exynos_keys=1     # the same with other boot-arguments
 ```
@@ -175,6 +176,14 @@ the log before it is made, and nothing without it:
 Start with `mali=1`, then one step more per run. Short of step 9 the domain is switched off again. **A known gap:**
 Samsung's kernel has ACPM hand the S2MPS18's BUCK6 (vdd_g3d) over before power-on, and nothing here does: if that rail
 is off, step 2 says the domain did not come up. `sysctl kern.hakios.mali` says the last step done.
+
+## The GPU
+
+`mali=N` brings the Mali-G72 up one step at a time (`drivers/gpu/hakios.mali.c`: 1 reads, 2 powers it with ACPM holding
+its supply and setting its rate, 3 the DTZPC, 4 identifies it, 5-6 reset and cores, 7-8 a job in identity and through
+its page tables, 9 HakiosMali for programs). With 9, `/redwood/bin/mali_test` (run by rc.jobs) checks the program side
+without Mesa, and the window server draws with OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with
+`GL=1`). Go up one step a run: `mkimage.sh cpus=4 bootcpu=1 mali=1 ...`.
 
 ## What comes next
 
