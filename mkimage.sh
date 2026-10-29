@@ -5,19 +5,20 @@
 # POCO: every run is an image flashed to RECOVERY (README.md, "On the phone"). The run ends by itself after SECS seconds
 # (loader_return_after=): the loader keeps the log in Samsung's pstore RAM and restarts the phone.
 #
-#   devices/starlte/mkimage.sh [-o xnu-starlte.img] [-k kernel] [-r root.apfs] [-s SECS] [boot-args...]
+#   devices/starlte/mkimage.sh [-o xnu-starlte.img] [-k kernel] [-r root.apfs] [-s SECS] [-q] [boot-args...]
 #
 # The kernel is the S9's own configuration (make starlte_defconfig && make kernel: hakios-kernel); the boot-arguments
-# default to that configuration's (tools/hakios-config.py args). The loader is xnuloader/loader.efi, built with the
+# default to that configuration's (tools/hakios-config.py args), with -v (the kernel's log on the screen, for a phone
+# with no other way to show it while it runs) unless -q. The loader is xnuloader/loader.efi, built with the
 # iPhone identity from your own IPSW (make loader): the image is yours, never to be published.
 set -e
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-OUT=xnu-starlte.img K=hakios-kernel RD=userland/root.apfs SECS=120
-while getopts o:k:r:s: opt; do
+OUT=xnu-starlte.img K=hakios-kernel RD=userland/root.apfs SECS=120 VERBOSE=-v
+while getopts o:k:r:s:q opt; do
 	case $opt in
-	o) OUT=$OPTARG ;; k) K=$OPTARG ;; r) RD=$OPTARG ;; s) SECS=$OPTARG ;;
-	*) sed -n 2,13p "$0"; exit 2 ;;
+	o) OUT=$OPTARG ;; k) K=$OPTARG ;; r) RD=$OPTARG ;; s) SECS=$OPTARG ;; q) VERBOSE= ;;
+	*) sed -n 2,14p "$0"; exit 2 ;;
 	esac
 done
 shift $((OPTIND - 1))
@@ -27,6 +28,7 @@ for f in "$L" "$K" "$RD"; do
 done
 ARGS="$*"
 [ -n "$ARGS" ] || ARGS=$(python3 tools/hakios-config.py args)
+ARGS="${VERBOSE:+$VERBOSE }$ARGS"
 P=$(mktemp "${TMPDIR:-/tmp}/starlte-payload.XXXXXX")
 trap 'rm -f "$P"' EXIT
 python3 xnuloader/mkpayload.py -o "$P" loader.efi="$L" kernel="$K" ramdisk="$RD" \

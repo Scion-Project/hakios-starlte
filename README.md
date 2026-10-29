@@ -96,6 +96,10 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
 4. Start it with Vol Up + Bixby + Power, held until the screen comes on. Back to Android: hold Vol Down + Power to restart.
    Flash TWRP back to RECOVERY when done.
 
+The default command line (`cpus=4 bootcpu=1 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 1-3 and leaves
+core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
+the phone, so a hang leaves something to read. `-v` shows the kernel's log on the screen while it starts.
+
 What to look for, in this order:
 1. HakiOS's logo (the UEFI started).
 2. The loader's banner, with `platform starlte, GICv2` and `CurrentEL=1` (Carbon has EL2).
