@@ -83,8 +83,15 @@ copied into this tree) are the references for the drivers still to write.
 ## The cores
 
 Cores 0-3 are Cortex-A55s (MPIDR 0x000-0x003). Cores 4-7 are Exynos M3s (0x100-0x103, 2.7 GHz), which Carbon's PSCI
-starts. The loader numbers them through `platform_starlte.core_mpidr`. The default configuration (`cpus=4`) gives the kernel
-the four A55s.
+starts. The loader numbers them through `platform_starlte.core_mpidr`. The default configuration (`cpus=2 bootcpu=2`) gives
+the kernel A55s 2 and 3, the only cores it can have so far (seen on the phone, 30 October 2026):
+
+- core 1: S-Boot powers it up and parks it before the hand-over, so CPU_ON for it never brings it to the kernel (the loader
+  leaves it out: `platform_starlte.parked_cores`);
+- the M3s: the firmware's CPU_ON for one (Carbon, then Samsung's EL3) never returns, and the processor that asked stays
+  inside it for good (patch 1505's log);
+- the A55s' own MPIDR has them one affinity field up (core 2 reads 0x81000200, MT set) from the numbers the device tree and
+  the firmware use (0x2); the kernel notices and translates (patch 1504).
 
 The M3s implement ARMv8.0, while the A55s and the iPhone X's A11 implement 8.2. That does not keep iOS off them: a count
 over three files of the iPhone X's shared cache (57.6 million words) found 7088 `LDAXR`s and 7208 `STLXR`s, the 8.0 way of
@@ -123,7 +130,7 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
    comes up with the log still in RAM. If the phone hangs instead, hold Vol Down + Power until it restarts, then at
    once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
 
-The default command line (`cpus=4 bootcpu=1 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 1-3 and leaves
+The default command line (`cpus=2 bootcpu=2 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 2 and 3 and leaves
 core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
 the phone, so a hang leaves something to read. `-v` shows the kernel's log on the screen while it starts.
 
@@ -244,7 +251,7 @@ is off, step 2 says the domain did not come up. `sysctl kern.hakios.mali` says t
 its supply and setting its rate, 3 the DTZPC, 4 identifies it, 5-6 reset and cores, 7-8 a job in identity and through
 its page tables, 9 HakiosMali for programs). With 9, `/redwood/bin/mali_test` (run by rc.jobs) checks the program side
 without Mesa, and the window server draws with OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with
-`GL=1`). Go up one step a run: `mkimage.sh cpus=4 bootcpu=1 mali=1 ...`.
+`GL=1`). Go up one step a run: `mkimage.sh cpus=2 bootcpu=2 mali=1 ...`.
 
 ## Vibration and the flashlight
 
