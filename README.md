@@ -140,6 +140,14 @@ which a restart leaves alone. Restart into TWRP or Android (Vol Down + Power) an
 lays the zones out differently: `cat /sys/module/ramoops/parameters/*` and the `log_pstore` node say how, and
 `platform_starlte.ram_log` in `xnuloader/loader.c` is the one number to change.
 
+The pstore's first half (0xFED10000, 16 KB) is ramoops' one dmesg record. The loader writes the start of the kernel's
+log there, behind the header line ramoops needs, so a run that comes back leaves `dmesg-ramoops-0` (the start) beside
+`pmsg-ramoops-0` (the loader, then the end). Before the panic buffer exists (`arm_vm_init`), a panic's text, the last
+exception's ESR/FAR/ELR and the frames that led to it go straight into that log (patch 1503). With boot-arg
+`early_log=1`, every kprintf from `PE_init_platform` on and the processors as the kernel sees them (MPIDR, the
+topology's phys ids) go there as well. That's for a phone that dies before its console works, at the cost of filling
+the 32 KB sooner.
+
 ## Building in CI: the installer in one click
 
 Actions > **s9-installer** > Run workflow (`.github/workflows/s9-installer.yml`). One job, about two hours on GitHub's
@@ -252,7 +260,7 @@ restart puts it out; never above Android's 60 mA). Both are off on the default c
 | iOS's brightness slider | read what the display service is sent (above), then map it to `hakios_panel_brightness()` |
 | Speaker audio | ABOX: a register dump from Android while sound plays decides whether its DMA can run without its firmware (1-3 weeks) |
 | Wi-Fi | BCM4361 on PCIe: the root complex and its PHY, then ISC brcmfmac through the Linux layer (3-4 weeks; bcmdhd is GPL) |
-| A longer log | 16 KB of pstore holds a panic but not a whole boot: a partition of the phone's, or USB |
+| A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
 | Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
 | The M3s | the ISA question above, then a loader that numbers two clusters |
