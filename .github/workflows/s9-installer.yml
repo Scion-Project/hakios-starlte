@@ -29,6 +29,9 @@ on:
       boot_args:
         description: Extra boot-arguments (for example mali=9, or abox=8 max98512=3)
         default: ""
+      time_limit:
+        description: A test run's seconds, after which the phone restarts into TWRP with the log (0, no limit)
+        default: "0"
 
 concurrency:
   group: s9-installer
@@ -183,15 +186,17 @@ jobs:
         env:
           PARTITION: ${{ inputs.partition }}
           BOOT_ARGS: ${{ inputs.boot_args }}
+          TIME_LIMIT: ${{ inputs.time_limit }}
         run: |
           mkdir -p "$W/out"
           SCION_KERNEL="$W/k" "$W/pkg/starlte/mkinstaller.sh" -s "$W/k/userland/system.apfs" -k "$KERNEL" \
-            -r "$W/k/userland/root.apfs" -p "$PARTITION" -o "$W/out/scion-starlte-installer.zip" $BOOT_ARGS
+            -r "$W/k/userland/root.apfs" -p "$PARTITION" -t "$TIME_LIMIT" -o "$W/out/scion-starlte-installer.zip" $BOOT_ARGS
 
       - name: Encrypt it (the installer inside, untouched), and check the archive
         env:
           PASS: ${{ secrets.INSTALLER_PASSPHRASE }}
           PARTITION: ${{ inputs.partition }}
+          TIME_LIMIT: ${{ inputs.time_limit }}
         run: |
           P="$W/pack" && mkdir -p "$P"
           mv "$W/out/scion-starlte-installer.zip" "$P/"
@@ -205,6 +210,7 @@ jobs:
           3. Copy scion-starlte-installer.zip to the phone (or adb sideload it) and flash it: Install > the zip > swipe.
              Flash this zip as it is: do not unpack it.
           4. Reboot > System. To leave Scion: five fingers held on the screen for 1.5 s (back to TWRP), or Vol Down + Power.
+          $([ "$TIME_LIMIT" = 0 ] || echo "   A test run: after $TIME_LIMIT s it restarts into TWRP by itself. Pull the log then (/sys/fs/pstore/pmsg-ramoops-0).")
           Android back: restore the Boot and $PARTITION backups in TWRP.
           EOF
           A="$W/upload/scion-s9-installer.7z" && mkdir -p "$W/upload"
