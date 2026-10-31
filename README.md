@@ -206,8 +206,21 @@ through the phone's own table), as Android reads it. Touch and battery share `dr
 sends Samsung's AOR, the part of each frame the pixels are off, through DSIM0's command FIFO. The range runs from
 the boot loader's level down to about 2 % of it; the gamma for the panel's full range is this panel's own and comes
 from Android's boot log (`dmesg | grep 'gamma\['`). `sysctl kern.hakios.brightness=0..255` sets it, and
-`panel_brightness=N` sets it at start. Which property iOS sets when its slider moves is not known yet: the display
-service logs every key it is sent (`IOMobileFramebuffer: ... sets ...`), and a key named `brightness` already works.
+`panel_brightness=N` sets it at start. The panel's gamma and AOR tables were checked against the BSP (every value of the
+256 AOR levels and 74 gamma rows, and the calculation for 702 MTPs, byte for byte).
+
+What iOS sets reaches the panel through `drivers/gpu/hakios.backlight.cpp`, where the driver registers at start
+(`hakios: panel brightness: s6e3ha8 registered`); on a phone without a panel driver nothing registers and nothing
+changes. Which property iOS sets when its slider moves is not known yet, so there are two ways in, both logged:
+
+- the display service: a key named `brightness` (0-1 or 0-255), always; each key it is sent is said
+  (`IOMobileFramebuffer: <process> sets <key> = <value>`);
+- `backlight=1` publishes `AppleARMBacklight` (the class XNU knows as an ARM phone's backlight) under `disp0`, with
+  IOGraphics' `IODisplayParameters` (`brightness` and `linear-brightness`, 0-65536). It says every key it is set
+  (`AppleARMBacklight: <process> sets ...`), every property asked of it that it lacks (`... asks for ...: not there`)
+  and who opens it. `backlight=2` also takes its `brightness` and `linear-brightness` as the panel's brightness.
+
+Written, not yet seen. First run: `backlight=1`, move the slider in Control Center, and read those lines.
 
 ## The GPU
 
@@ -249,7 +262,7 @@ restart puts it out; never above Android's 60 mA). Both are off on the default c
 
 | Step | How |
 |---|---|
-| iOS's brightness slider | read what the display service is sent (above), then map it to `hakios_panel_brightness()` |
+| iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | ABOX: a register dump from Android while sound plays decides whether its DMA can run without its firmware (1-3 weeks) |
 | Wi-Fi | BCM4361 on PCIe: the root complex and its PHY, then ISC brcmfmac through the Linux layer (3-4 weeks; bcmdhd is GPL) |
 | A longer log | 16 KB of pstore holds a panic but not a whole boot: a partition of the phone's, or USB |
