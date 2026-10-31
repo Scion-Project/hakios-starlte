@@ -280,8 +280,13 @@ channel 0 and the BCM4361 behind it, as far as the link and the chip's identity.
 PMU, CMU_FSYS1's gates, the pins), 2 powers the radio (WLAN_REG_ON, gpg0-5, 200 ms), 3 brings the PHY up, 4 trains the
 link, 5 reads the endpoint's ID (Broadcom 14e4:441f expected) and sizes and places its BARs. No firmware is loaded.
 Go up one step a run: `mkimage.sh -s 60 cpus=2 bootcpu=2 wifi_pcie=1`, and so on; every line starts with `exynos_pcie:`.
-[WIFI.md](WIFI.md) has the steps, what each should print, and the plan for stage 2 (Linux's brcmfmac on the Linux layer
-the POCO's ath11k runs on, and the firmware and NVRAM files it needs from the phone). Written, not yet run.
+[WIFI.md](WIFI.md) has the steps and what each should print. Written, not yet run.
+
+Stage 2 (`drivers/wifi/hakios.brcmfmac.c`, `wifi_pcie=6 brcmfmac=N`, built in, off by default): Linux's brcmfmac
+(ISC) on the Linux layer the POCO's ath11k runs on, its object made by `tools/mk-brcmfmac.sh` before the kernel is
+built. 6 hands the device on; then `brcmfmac=1` reads the chip's ID through BAR0, 2 asks for the firmware, NVRAM and CLM
+(from the user's own phone, in `fw-wifi/` under brcmfmac's names: WIFI.md has the table), 3 starts the firmware, 4 sends
+it its first command (the first DMA) and registers the wiphy. No station above it yet. Written, not yet run.
 
 ## Speaker audio
 
@@ -323,7 +328,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 |---|---|
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
-| Wi-Fi | stage 1 (the root complex, the link, the chip's ID) is written, `wifi_pcie=N`; then ISC brcmfmac through the Linux layer ([WIFI.md](WIFI.md); bcmdhd is GPL) |
+| Wi-Fi | stage 1 (the link) and the first slice of stage 2 (brcmfmac up to the firmware's first command) are written: `wifi_pcie=1..6`, then `brcmfmac=1..4`, one run each ([WIFI.md](WIFI.md)); then the station above brcmfmac (cfg80211's side) and INTx |
 | A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
 | Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
