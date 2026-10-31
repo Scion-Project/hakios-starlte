@@ -372,6 +372,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 14 | `tmu=2` | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell (the big zone is the M3s', which cannot be started yet: The cores, above) |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 | 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
+| 17 | `bt=1` up to `bt=6`, one step a run (6 needs `fw-bt/bcm4361B2.hcd`) | "UART_BT's clock ... (ratio 2: 200 MHz", the expander's ports and BT_EN, "loopback: all 16 bytes came back", "the chip powered", "manufacturer 000f (Broadcom)", then the patch and the version after it ([BLUETOOTH.md](BLUETOOTH.md)) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
@@ -382,6 +383,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 |---|---|
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
+| Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
 | Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, INTx, the phone's address, the station, joining) are written: `wifi_pcie=1..6`, then `brcmfmac=1..8`, one run each ([WIFI.md](WIFI.md)); not yet run |
 | A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
