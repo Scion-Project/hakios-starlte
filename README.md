@@ -273,6 +273,28 @@ its registers written, in their haptic bits only, each read back) driven by chan
 driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
 restart puts it out; never above Android's 60 mA). Both are off on the default command line until seen working.
 
+## First runs of the drivers, one flash each
+
+Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
+step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 cpus=4 bootcpu=1
+<args>`). Note that `mkimage.sh` with no arguments takes the configuration's own boot-arguments, which turn several
+of these drivers on: pass the arguments explicitly.
+
+| Run | Arguments | What to look for |
+|---|---|---|
+| 1 | none of the drivers | the loader's banner, "3 of 3 processors are running" |
+| 2 | `exynos_keys=1` | "exynos-keys: power: bank 0x60 pin 4, CON f (interrupt), released", then down/up on presses |
+| 3 | `s6sy761=1 s6sy761_steps=1` | "USI mode 4 ... divider ...": if the divider is not 1 on a 400 MHz branch, add `s6sy761_ipclk=` |
+| 4 | `s6sy761=1 s6sy761_steps=4 s6sy761_ldo=0` | "boot status 20 (its firmware runs)" and "panel: 1440 x 2960 ..."; with no answer, again without `s6sy761_ldo=0` |
+| 5 | `s6sy761=1` | "step 6: watching the IRQ pin", then touches |
+| 6 | `max77705=1 max77705_steps=1`, then `_steps=4` | "version N, revision N", "now: NN.NN%, NNNN mV ..."; `max77705_ipclk=` if the clock logged differs |
+| 7 | `max77705=1 max77705_haptic=1` | "haptic: the motor for iOS ... PWM 1270 ticks of 26000000 Hz" |
+| 8 | `torch=1`, then `torch=2 torch_secs=2` | "ID ...; FLED_CTRL1 ..., CTRL2 ..." (reads only), then lit for 2 s at 60 mA |
+| 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
+
+The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
+`max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
+
 ## What comes next
 
 | Step | How |
