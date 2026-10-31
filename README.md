@@ -107,7 +107,7 @@ make starlte_defconfig && make kernel        # the common kernel, no driver of a
 make loader                                  # with the iPhone identity from your own IPSW
 (source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 bash build.sh)   # the small root, the whole root here (ALONE=1)
 devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root
-devices/starlte/mkimage.sh -s 300 cpus=8 bootcpu=4 exynos_keys=1     # the same with other boot-arguments
+devices/starlte/mkimage.sh -s 300 cpus=2 bootcpu=2 exynos_keys=1     # the same with other boot-arguments
 ```
 
 Samsung has no `fastboot boot`, and Silicium's UEFI has no USB gadget, so there is no resident loader to send runs to as
@@ -137,7 +137,7 @@ the phone, so a hang leaves something to read. `-v` shows the kernel's log on th
 What to look for, in this order:
 1. HakiOS's logo (the UEFI started).
 2. The loader's banner, with `platform starlte, GICv2` and `CurrentEL=1` (Carbon has EL2).
-3. The kernel's log, `gic: v2 ... cpu 0 is interface 1` (the kernel starts on core 1), `3 of 3 processors are running`.
+3. The kernel's log, `gic: v2 ... cpu 0 is interface 2` (the kernel starts on core 2), `2 of 2 processors are running`.
 4. launchd.
 
 Photograph the screen as well. The loader's `logdump` is a Qualcomm partition, and this phone has none. Instead, the
@@ -185,7 +185,7 @@ root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to S
 partition read through the loader). The small root for it is built with `ALONE=1 RC=rc.launchd`.
 
 
-Silicium's UEFI drives the UFS and stays resident. With `ufs=2 bootcpu=4 cpus=8`, the loader keeps core 0 and reads for the kernel, which runs on the other seven: the same
+Silicium's UEFI drives the UFS and stays resident. With `ufs=2` (and the default `cpus=2 bootcpu=2`), the loader keeps core 0 and reads for the kernel, which runs on cores 2 and 3: the same
 service the POCO uses (`drivers/storage/hakios.ufs.c`). Every GPT partition becomes `/dev/ufs_NAME`, read-only, and
 `root_apfs=ufs_NAME` mounts iOS's root volume from one.
 
@@ -196,7 +196,7 @@ decides what is lost:
 - `USERDATA`: Android's data is wiped.
 
 List the partitions and their sizes first: `adb shell ls -l /dev/block/by-name`.
-Then: `devices/starlte/mkimage.sh cpus=8 bootcpu=4 exynos_keys=1 ufs=2 root_apfs=ufs_NAME`. Nothing writes to the flash: `ufs_write=1` is for the
+Then: `devices/starlte/mkimage.sh cpus=2 bootcpu=2 exynos_keys=1 ufs=2 root_apfs=ufs_NAME`. Nothing writes to the flash: `ufs_write=1` is for the
 POCO's `darwin` partition only, and the loader refuses any other.
 
 **The kernel's own UFS driver** (`drivers/storage/hakios.ufshc.c`, `ufs_native=4 ufs_native_soc=exynos9810`, off by default;
@@ -219,11 +219,11 @@ unset. Without `ufs=2`, the root comes from the image (the small root, `-s`). Th
 in TWRP after each:
 
 ```sh
-devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810                     # step 1
-devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=2   # the link
-devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=3   # NOP OUT
-devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=4   # READ CAPACITY
-devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=5   # the GPTs, /dev/ufs_*
+devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810                     # step 1
+devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=2   # the link
+devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=3   # NOP OUT
+devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=4   # READ CAPACITY
+devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=5   # the GPTs, /dev/ufs_*
 ```
 
 Each step says what it found (`ufs: own: ...`) and stops with `ufs: own: step N done`; go on only when it says what
@@ -231,7 +231,7 @@ the table above expects.
 
 ## Touch
 
-`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, on by default here). Its first run on the phone should go one step at a
+`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, off by default until it has been seen working). Its first run on the phone should go one step at a
 time: `s6sy761_steps=1` only reads (the bus's clock divider among other things: if it says the HSI2C's input clock is not
 200 MHz, `s6sy761_ipclk=` corrects the timing); 4 asks the chip its boot status, which should be 0x20 (its firmware
 running, powered as the boot loader left it); 6 is touch. The coordinates are the chip's own range (its panel
@@ -239,14 +239,14 @@ information, else 0-4095 on both axes), spread over the whole panel, which is wh
 
 ## Battery
 
-`drivers/power/hakios.max77705.c` (`max77705=1`, on by default here) reads the MAX77705's fuel gauge (0x36) and charger
+`drivers/power/hakios.max77705.c` (`max77705=1`, off by default until it has been seen working) reads the MAX77705's fuel gauge (0x36) and charger
 (0x69) on CMGP's HSI2C every 5 seconds, and hands the charge, voltage, current, capacity, cycles and charger state to
 iOS's power source. It never writes the chip. The temperature is the battery's thermistor (channel 4 of CMGP's ADC,
 through the phone's own table), as Android reads it. Touch and battery share `drivers/core/hakios.exynos_hsi2c.c`.
 
 ## Brightness
 
-`drivers/gpu/hakios.s6e3ha8.c` (`panel=1`, on by default here). The S6E3HA8 has no DCS brightness command, so the driver
+`drivers/gpu/hakios.s6e3ha8.c` (`panel=1`, off by default until it has been seen working). The S6E3HA8 has no DCS brightness command, so the driver
 sends Samsung's AOR, the part of each frame the pixels are off, through DSIM0's command FIFO. The range runs from
 the boot loader's level down to about 2 % of it; the gamma for the panel's full range is this panel's own and comes
 from Android's boot log (`dmesg | grep 'gamma\['`). `sysctl kern.hakios.brightness=0..255` sets it, and
@@ -345,13 +345,13 @@ it the way Android does, but never arms its hardware trip. Written, not yet run.
 ## First runs of the drivers, one flash each
 
 Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
-step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 cpus=4 bootcpu=1
-<args>`). Note that `mkimage.sh` with no arguments takes the configuration's own boot-arguments, which turn several
-of these drivers on: pass the arguments explicitly.
+step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 cpus=2 bootcpu=2
+<args>`). Note that `mkimage.sh` given any arguments uses those alone, in place of the configuration's (`cpus=2
+bootcpu=2`): keep those two in every run, as the column below leaves them out.
 
 | Run | Arguments | What to look for |
 |---|---|---|
-| 1 | none of the drivers | the loader's banner, "3 of 3 processors are running" |
+| 1 | none of the drivers | the loader's banner, "2 of 2 processors are running" |
 | 2 | `exynos_keys=1` | "exynos-keys: power: bank 0x60 pin 4, CON f (interrupt), released", then down/up on presses |
 | 3 | `s6sy761=1 s6sy761_steps=1` | "USI mode 4 ... divider ...": if the divider is not 1 on a 400 MHz branch, add `s6sy761_ipclk=` |
 | 4 | `s6sy761=1 s6sy761_steps=4 s6sy761_ldo=0` | "boot status 20 (its firmware runs)" and "panel: 1440 x 2960 ..."; with no answer, again without `s6sy761_ldo=0` |
@@ -364,7 +364,7 @@ of these drivers on: pass the arguments explicitly.
 | 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
 | 12 | `abox=7`, then `abox=7 max98512=3` | "RDMA0 STATUS each ms" moving and about 192000 bytes a second read; then a 1 kHz tone for 3 s |
 | 13 | `tmu=1` | "tmu: 1: gate ... open", each block's "CONTROL ... (CORE_EN 1 ...)", every sensor's "TRIMINFO ... (25 C = NN ...), code NN = NN.0 C" near the room's temperature plus a few; if CORE_EN is 0 or no sensor reads, again with `tmu_enable=1`; if the gate is CLOSED, with `tmu_ungate=1` |
-| 14 | `tmu=2`, with `bootcpu=4 cpus=8` once | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell; the big zone warmer with the M3s running |
+| 14 | `tmu=2` | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell (the big zone is the M3s', which cannot be started yet: The cores, above) |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 | 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
 

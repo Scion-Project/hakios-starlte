@@ -49,7 +49,8 @@ tables.
 ## The first runs
 
 One image per run, each read from pstore in TWRP afterwards (README.md, "On the phone"). Build with the arguments
-explicitly: `mkimage.sh` with none takes the configuration's own. Every line of the drivers starts with `abox:` or
+explicitly, and with `cpus=2 bootcpu=2` among them: `mkimage.sh` given any arguments uses those alone, in place of the
+configuration's. Every line of the drivers starts with `abox:` or
 `max98512:`. 32 KB of pstore holds about 300 of these lines: if a run's start is cut off, run it again with fewer
 other drivers on.
 
@@ -60,7 +61,7 @@ other drivers on.
 | 3 | `abox=3` | `PLL_AUD stable after N us`; `PLL_AUD 1179648xxx Hz; so ACLK 589824xxx, its APB 196608xxx, AUDIF 73728xxx, UAIF1's BCLK 1536000` |
 | 4 | `abox=4` | `gpb1 CON (0x17c60020): ... reads 0x....2222` |
 | 5 | `abox=5` | `UAIF1_CTRL1 (0x17c50514): 0 -> wrote 0x984f000, reads 0x984f000`; `gpb1-0..3 with UAIF1 on:` changes on at least one pin (with UAIF1 off: none) |
-| 6 | `abox=6` | `SPUS's sample banks (0x17c50220 on): RDMA0-7 ...`, then `RDMA0's sample bank ... 512 bytes` written and read back |
+| 6 | `abox=6` | `SPUS's sample banks (0x17c50220 on): RDMA0-7 ...` and `RDMA0's bank: N bytes at ...`; then `about to give RDMA0 a sample bank of 512 bytes` and `SPUS_SBANK_RDMA0 (SIZE)` written and read back (`RDMA0's sample bank left as it reads` when the bank was not 0 already) |
 | 7 | `max98512=1`, then `max98512=2` | `max98512: top (0x39): MAX98512, revision 0x..` and the same for 0x3A; then both chips' registers after the set-up, shut down |
 | 8 | `abox=7` (no amplifiers: nothing is heard) | `RDMA0 STATUS each ms:` values that change; `N bytes a second read (192000 is 48 kHz 16-bit stereo)` near 192000; `RDMA0 stopped after N us` |
 | 9 | `abox=7 max98512=3` | `max98512: on: 48000 Hz, 2 x 16 bits, I2S ...`; a 1 kHz tone from both speakers for 3 s (quiet: -20 dBFS at the receiver's level) |
