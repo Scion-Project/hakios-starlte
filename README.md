@@ -241,30 +241,29 @@ Written, not yet seen. First run: `backlight=1`, move the slider in Control Cent
 
 `drivers/gpu/hakios.mali.c` and `hakios.mali.cpp` (`CONFIG_HAKIOS_MALI`, built in): HakiOS's Mali-G52 driver of the
 Infinix Hot 20 ([hakios-mt6768](https://github.com/oosexgang/hakios-mt6768), `redwood_mali.c` and `RedwoodMali.cpp`),
-with MediaTek's power and clocks replaced by the Exynos 9810's. `mali=N` makes the first N of nine steps, each said in
-the log before it is made, and nothing without it:
+with MediaTek's power and clocks replaced by the Exynos 9810's, as the mainline Linux port to the S9+ brings the same
+GPU up from S-Boot's state. `mali=N` makes the first N of nine steps, each said in the log before it is made, and
+nothing without it (it is not on the default command line):
 
 | Step | What |
 |---|---|
-| 1 | reads only: the PMU's G3D status, CMU_G3D +0x100/+0x140/+0x148 (PLL_G3D's rate), GPU_ID if the domain is on |
-| 2 | power on: CMU_G3D +0x148 = 0x30000003, +0x140 and +0x100 bit 4, PMU 0x14064040 [3:0] = 0xF; PLL_G3D must be stable |
-| 3 | the DTZPC restore, SMC 0x82000410 (1, 0x17410204), passed to EL3 by Carbon |
-| 4 | GPU_ID (a G72), MMU_FEATURES (35 bits of GPU address at least), the cores |
-| 5-6 | a soft reset with COHERENCY_ENABLE = 31 (none); the L2, tiler and shader cores powered |
-| 7-8 | one job in identity mode, then the same through the GPU's page tables |
+| 1 | reads only: the PMU's G3D configuration and status, CMU_G3D (PLL_G3D and its rate, the muxes, the bus dividers), and through ACPM the S2MPS18's B6CTRL and B6OUT (BUCK6, vdd_g3d). The GPU itself is not read |
+| 2 | B6OUT = 0x68 (950 mV, the regulator's most in the device tree) through ACPM and read back, or the steps end; PLL_G3D to `mali_mhz` (260, S-Boot's, unless said); then, if the domain is off, Samsung's power-on: CMU_G3D +0x148 = 0x30000003, +0x140 and +0x100 bit 4, PMU 0x14064040 [3:0] = 0xF and its status waited for |
+| 3 | after a power-on of its own only: the DTZPC restore, SMC 0x82000410 (1, 0x17410204), passed to EL3 by Carbon; then the bus dividers (BUSD = the PLL, BUSP = a quarter) |
+| 4 | the first read of the GPU: GPU_ID (a G72, arch 6, product 1), MMU_FEATURES (35 bits of GPU address at least, 36 of physical), the cores |
+| 5 | a soft reset (a hard one if it does not finish), COHERENCY_ENABLE = 31 (none: the phone's device tree asks kbase for no coherency), L2_MMU_CONFIG's external read and write limits cleared |
+| 6 | the L2, then the shader cores, then the tiler, each waited for |
+| 7-8 | one write-value job on slot 1, in identity mode, then through the GPU's own AArch64 page tables (four levels on a GPU of 48 bits, as kbase and panfrost walk it) |
 | 9 | HakiosMali, the IOKit service Mesa's panfrost draws through |
 
-Start with `mali=1`, then one step more per run. Short of step 9 the domain is switched off again. **A known gap:**
-Samsung's kernel has ACPM hand the S2MPS18's BUCK6 (vdd_g3d) over before power-on, and nothing here does: if that rail
-is off, step 2 says the domain did not come up. `sysctl kern.hakios.mali` says the last step done.
-
-## The GPU
-
-`mali=N` brings the Mali-G72 up one step at a time (`drivers/gpu/hakios.mali.c`: 1 reads, 2 powers it with ACPM holding
-its supply and setting its rate, 3 the DTZPC, 4 identifies it, 5-6 reset and cores, 7-8 a job in identity and through
-its page tables, 9 HakiosMali for programs). With 9, `/redwood/bin/mali_test` (run by rc.jobs) checks the program side
-without Mesa, and the window server draws with OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with
-`GL=1`). Go up one step a run: `mkimage.sh cpus=2 bootcpu=2 mali=1 ...`.
+`mali_mhz=455` or `572` picks another of the stock table's rates (M/P/S inside the PLL's range: Samsung's PLL_1018X
+limits); `mali_acpm=0` leaves the rail as found, which hung the S9+ (a test only). Short of step 9 a domain the driver
+switched on is switched off again (reset first, Samsung's low-power settings, the DTZPC save) and B6OUT put back; a
+domain the boot left on is left on, with the rail at 950 mV under it. Start with `mali=1`, then one step more per run
+(`mkimage.sh cpus=2 bootcpu=2 mali=1 ...`); `sysctl kern.hakios.mali` says the last step done. With 9,
+`/redwood/bin/mali_test` (run by rc.jobs) checks the program side without Mesa, and the window server draws with
+OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with `GL=1`). Written and checked against Samsung's
+kernel (CAL, kbase, ACPM, the device tree) and the S9+ port; not yet run on the phone.
 
 ## Vibration and the flashlight
 
@@ -338,6 +337,7 @@ of these drivers on: pass the arguments explicitly.
 | 13 | `tmu=1` | "tmu: 1: gate ... open", each block's "CONTROL ... (CORE_EN 1 ...)", every sensor's "TRIMINFO ... (25 C = NN ...), code NN = NN.0 C" near the room's temperature plus a few; if CORE_EN is 0 or no sensor reads, again with `tmu_enable=1`; if the gate is CLOSED, with `tmu_ungate=1` |
 | 14 | `tmu=2`, with `bootcpu=4 cpus=8` once | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell; the big zone warmer with the M3s running |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
+| 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
