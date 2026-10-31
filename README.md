@@ -283,6 +283,15 @@ Go up one step a run: `mkimage.sh -s 60 cpus=2 bootcpu=2 wifi_pcie=1`, and so on
 [WIFI.md](WIFI.md) has the steps, what each should print, and the plan for stage 2 (Linux's brcmfmac on the Linux layer
 the POCO's ath11k runs on, and the firmware and NVRAM files it needs from the phone). Written, not yet run.
 
+## Speaker audio
+
+Two drivers, both built in and off until asked: `abox=N` (`drivers/audio/hakios.exynos_abox.c`, 8 steps) is the SoC's
+side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS0 -> UAIF1, I2S at 48 kHz, 2 x 16 bits; `max98512=N`
+(`drivers/audio/hakios.max98512.c`, 3 steps) is the two amplifiers on I2C. Step 8 of ABOX makes it the sink of
+`/dev/hakios-audio`, the same way in for iOS's sound as on the POCO, with iOS's volume and mute followed. Whether
+ABOX's DMA runs without its firmware is something Android's source cannot say (Android never tries); what it does say,
+and the runs that will tell, are in [AUDIO.md](AUDIO.md). Written, not yet heard.
+
 ## First runs of the drivers, one flash each
 
 Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
@@ -301,6 +310,9 @@ of these drivers on: pass the arguments explicitly.
 | 7 | `max77705=1 max77705_haptic=1` | "haptic: the motor for iOS ... PWM 1270 ticks of 26000000 Hz" |
 | 8 | `torch=1`, then `torch=2 torch_secs=2` | "ID ...; FLED_CTRL1 ..., CTRL2 ..." (reads only), then lit for 2 s at 60 mA |
 | 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
+| 10 | `abox=1` up to `abox=6`, one step a run | "the AUD domain is on", "IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648xxx Hz", "UAIF1_CTRL1 ... reads 0x984f000", the sample banks ([AUDIO.md](AUDIO.md)) |
+| 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
+| 12 | `abox=7`, then `abox=7 max98512=3` | "RDMA0 STATUS each ms" moving and about 192000 bytes a second read; then a 1 kHz tone for 3 s |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
@@ -310,7 +322,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Step | How |
 |---|---|
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
-| Speaker audio | ABOX: a register dump from Android while sound plays decides whether its DMA can run without its firmware (1-3 weeks) |
+| Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
 | Wi-Fi | stage 1 (the root complex, the link, the chip's ID) is written, `wifi_pcie=N`; then ISC brcmfmac through the Linux layer ([WIFI.md](WIFI.md); bcmdhd is GPL) |
 | A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
