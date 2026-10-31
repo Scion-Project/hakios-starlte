@@ -297,6 +297,23 @@ side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS0 -> UAIF1, I2S at 48 kH
 ABOX's DMA runs without its firmware is something Android's source cannot say (Android never tries); what it does say,
 and the runs that will tell, are in [AUDIO.md](AUDIO.md). Written, not yet heard.
 
+## Temperatures
+
+Android keeps the S9 cool with Linux's thermal framework and Samsung's APM firmware: the big cores slowed from 83
+degrees and taken away at 96, the GPU slowed from 88, every zone's "hot" trip at 115. HakiOS has none of that, so
+`drivers/power/hakios.exynos_tmu.c` (`tmu=N`, built in, off by default) at least watches. It reads the Exynos 9810's TMU
+itself: TMU_TOP at 0x10070000 (BIG: sensors 1, 2, 3, 4, 6; LITTLE: 5) and TMU_SUB at 0x10074000 (G3D: 1; ISP: 2), each
+sensor's 9-bit code made degrees with its own fuses (TRIMINFO: the codes at 25 and 85 degrees), the arithmetic of the
+BSP's `exynos_tmu.c` (checked on the host: `tools/exynos-tmu-test.sh`). `tmu=1` only reads (the TMU's clock gate in
+CMU_PERIS first, then the blocks as the boot left them, every sensor's fuse, code and temperature, and the thresholds
+S-Boot may have armed), `tmu=2` publishes `sysctl kern.hakios.temp.*` (`big_mc`, `little_mc`, `g3d_mc`, `isp_mc`,
+`max_mc`, `hottest`, `sensors`, `battery_c`) and the POCO's `kern.hakios.thermal_*`, `tmu=3` ends the run when a zone
+reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_stop` (60) three times in a row: a loud
+"TOO HOT" in the log, then back to the loader, which stops every core and restarts into TWRP with the log kept. With
+`tmu_off=1` and no charger it powers the phone off instead (PS_HOLD low, as Samsung's power-off does; the log is lost).
+Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
+it the way Android does, but never arms its hardware trip. Written, not yet run.
+
 ## First runs of the drivers, one flash each
 
 Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
@@ -318,6 +335,9 @@ of these drivers on: pass the arguments explicitly.
 | 10 | `abox=1` up to `abox=6`, one step a run | "the AUD domain is on", "IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648xxx Hz", "UAIF1_CTRL1 ... reads 0x984f000", the sample banks ([AUDIO.md](AUDIO.md)) |
 | 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
 | 12 | `abox=7`, then `abox=7 max98512=3` | "RDMA0 STATUS each ms" moving and about 192000 bytes a second read; then a 1 kHz tone for 3 s |
+| 13 | `tmu=1` | "tmu: 1: gate ... open", each block's "CONTROL ... (CORE_EN 1 ...)", every sensor's "TRIMINFO ... (25 C = NN ...), code NN = NN.0 C" near the room's temperature plus a few; if CORE_EN is 0 or no sensor reads, again with `tmu_enable=1`; if the gate is CLOSED, with `tmu_ungate=1` |
+| 14 | `tmu=2`, with `bootcpu=4 cpus=8` once | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell; the big zone warmer with the M3s running |
+| 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
