@@ -111,7 +111,7 @@ devices/starlte/mkimage.sh -s 300 cpus=2 bootcpu=2 exynos_keys=1     # the same 
 ```
 
 Samsung has no `fastboot boot`, and Silicium's UEFI has no USB gadget, so there is no resident loader to send runs to as
-on the POCO. Each run is an image, and the run returns to the loader by itself after `-s` seconds. The loader then keeps
+on the POCO (the kernel's own USB link, below, gives the log and a console, not a way to send runs). Each run is an image, and the run returns to the loader by itself after `-s` seconds. The loader then keeps
 the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built from source, open throughout:
 `prebuilt/README.md`), or from `Mu-Silicium/` when one is built here (`devices/starlte/uefi/apply.sh`, then
 `build_uefi.py -d starlte -r RELEASE`).
@@ -347,6 +347,39 @@ reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_s
 Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
 it the way Android does, but never arms its hardware trip. Written, not yet run.
 
+## USB: the whole log and a console over the cable
+
+pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
+hakios.exynos_usb.c; built in, off by default) makes the phone's USB-C port a USB serial device instead: the kernel's
+log from its first line, live, for as long as the run lasts, the panic text at the end, and a line console back. It is
+the DWC3 at 0x10C00000 in device mode, high speed, with a CDC-ACM function (pid.codes' test ID 1209:0001, "HakiOS kernel
+log and console"): `/dev/ttyACM0` on Linux, `/dev/cu.usbmodem*` on a Mac. The PHY is brought up with the BSP's USB 3.1
+CAL sequence for the 2.0 side only, the SuperSpeed lanes held idle (the head of hakios.exynos_usb.c has every register
+and its line in the BSP). Silicium's UEFI has no USB driver in this FD, so only S-Boot can have touched the controller:
+step 1 says what it left, step 2 stops it if it runs, step 3 resets it whatever it finds.
+
+The steps: 1 reads (the PMU's isolation, the clocks, LDO9-14 through ACPM, the PHY's and the DWC3's registers), 2 the
+PHY, 3 the core reset and set up as a device with the pull-up off, 4 the pull-up on and the host's requests answered
+(each said in the log), 5 the log streamed and the console. On the way back to the loader the rest of the log is sent
+for up to `usb_gadget_drain` ms (1000) before the controller is stopped. Options: `usb_gadget_clk=1` opens a clock S-Boot
+left shut (Android's mux, divider and gate), `usb_gadget_ldo=1` puts LDO9-14 into Android's USB mode (read back),
+`usb_gadget_fs=1` full speed.
+
+On the host (a Linux machine; a Mac the same with `/dev/cu.usbmodem*`):
+
+```sh
+sudo systemctl stop ModemManager       # or it may open the port first; a udev rule with ID_MM_DEVICE_IGNORE=1 for 1209:0001 does the same
+dmesg -w                               # step 4: "idVendor=1209, idProduct=0001", "cdc_acm ...: ttyACM0: USB ACM device"
+while :; do [ -e /dev/ttyACM0 ] && stty -F /dev/ttyACM0 raw -echo && cat /dev/ttyACM0 >> s9-run.log; sleep 0.2; done
+picocom -q /dev/ttyACM0                # the console: type help and Enter (the phone echoes the line, "usb> help")
+```
+
+The console's commands: `help`, `stat` (the link's counters), `uptime`, `sysctl NAME`, `log` (the kernel's log again from
+its start), `return` (end the run: the loader restarts the phone into TWRP). It is the kernel's, not a shell.
+Written, not yet run; the descriptors and requests are checked on the host (`tools/usb-acm-test.sh`). Not known: whether
+the MAX77705's switch routes D+/D- to the SoC while HakiOS runs (step 4's "waiting for a host: line ..." says what the
+PHY sees), and whether S-Boot leaves the clocks open.
+
 ## First runs of the drivers, one flash each
 
 Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
@@ -373,6 +406,11 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 | 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
 | 17 | `bt=1` up to `bt=6`, one step a run (6 needs `fw-bt/bcm4361B2.hcd`) | "UART_BT's clock ... (ratio 2: 200 MHz", the expander's ports and BT_EN, "loopback: all 16 bytes came back", "the chip powered", "manufacturer 000f (Broadcom)", then the patch and the version after it ([BLUETOOTH.md](BLUETOOTH.md)) |
+| 18 | `usb_gadget=1` | "usb: exynos9810: PMU USB PHY ...", "CMU_TOP CLKCMU_FSYS0_USB30DRD: ... gate ..." (if SHUT, the next runs add `usb_gadget_clk=1`), "LDO9-14 CTRL: ...", "USBCON as the boot left it", "DWC3 as the boot left it: GSNPSID 5533...", DCTL's RUN_STOP |
+| 19 | `usb_gadget=2` | "2a: PMU +0x72C ... -> ...1" to "2l: COMBO_PMA_CTRL ...", none "(NOT as written)"; "USBCON after: ... (SIDDQ 0, line ...)" |
+| 20 | `usb_gadget=3` | "3: reset done in N us", "DWC3 set up: ... DCTL ... event buffer ..."; "did not finish in 500 ms" means the PHY gives the link no clock |
+| 21 | `usb_gadget=4`, the cable in a Linux host running `dmesg -w` | the host: a new high-speed device 1209:0001 and ttyACM0; the phone: "bus reset 1", "connected at high speed", "setup 1: 80 06 0100 ...", "address N", "configured"; with none, "waiting for a host: line ..." every 10 s (then `usb_gadget_ldo=1`, or `usb_gadget_fs=1`) |
+| 22 | `usb_gadget=5`, `-s 300` | the whole log on the host as it is written (above); `help`, `stat`, then `return`: the phone restarts into TWRP and the host's log ends with the run's last lines |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
@@ -385,7 +423,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
 | Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, INTx, the phone's address, the station, joining) are written: `wifi_pcie=1..6`, then `brcmfmac=1..8`, one run each ([WIFI.md](WIFI.md)); not yet run |
-| A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
+| A longer log | USB is written (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
 | Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
 | The M3s | the ISA question above, then a loader that numbers two clusters |
