@@ -273,6 +273,16 @@ its registers written, in their haptic bits only, each read back) driven by chan
 driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
 restart puts it out; never above Android's 60 mA). Both are off on the default command line until seen working.
 
+## Wi-Fi, stage 1
+
+`drivers/wifi/hakios.exynos_pcie.c` (`wifi_pcie=N`, built in, off by default): the Exynos 9810's PCIe root complex of
+channel 0 and the BCM4361 behind it, as far as the link and the chip's identity. 1 only looks (the PHY's isolation in the
+PMU, CMU_FSYS1's gates, the pins), 2 powers the radio (WLAN_REG_ON, gpg0-5, 200 ms), 3 brings the PHY up, 4 trains the
+link, 5 reads the endpoint's ID (Broadcom 14e4:441f expected) and sizes and places its BARs. No firmware is loaded.
+Go up one step a run: `mkimage.sh -s 60 cpus=2 bootcpu=2 wifi_pcie=1`, and so on; every line starts with `exynos_pcie:`.
+[WIFI.md](WIFI.md) has the steps, what each should print, and the plan for stage 2 (Linux's brcmfmac on the Linux layer
+the POCO's ath11k runs on, and the firmware and NVRAM files it needs from the phone). Written, not yet run.
+
 ## First runs of the drivers, one flash each
 
 Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
@@ -301,7 +311,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 |---|---|
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | ABOX: a register dump from Android while sound plays decides whether its DMA can run without its firmware (1-3 weeks) |
-| Wi-Fi | BCM4361 on PCIe: the root complex and its PHY, then ISC brcmfmac through the Linux layer (3-4 weeks; bcmdhd is GPL) |
+| Wi-Fi | stage 1 (the root complex, the link, the chip's ID) is written, `wifi_pcie=N`; then ISC brcmfmac through the Linux layer ([WIFI.md](WIFI.md); bcmdhd is GPL) |
 | A longer log | 32 KB of pstore (both halves) holds a panic and the start of a boot, not a whole boot: a partition of the phone's, or USB |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
 | Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
