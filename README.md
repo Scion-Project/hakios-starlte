@@ -71,7 +71,7 @@ A driver's "Sources" comment names files of the kernel fork at the commit below.
 | Display | 1440 x 2960, 32 bits, at 0xCC000000 (the boot loader's buffer, `s3cfb.bootloaderfb`); S6E3HA8 panel on DSIM 0x16080000 | Silicium `starlte.dsc`, the device tree |
 | Touch | Samsung S6SY761 (`sec,sec_ts`) at 0x48 on HSI2C 0x104B0000 (SPI 0x194) | device tree `touchscreen@48` |
 | Buttons | GPIO keys: power, volume up and down, Bixby | device tree `gpio_keys`; Silicium `KeypadDeviceLib` |
-| Storage | UFS at 0x11120000 (UniPro 0x11130000) | device tree `ufs@0x11120000`; Silicium `PlatformUfsLib` |
+| Storage | UFS at 0x11120000 (UFSHCI), its vendor registers at 0x11121100, UniPro 0x11110000, the protector (FMP) 0x11130000, the PHY's PMA 0x11124000; SPI 242; PMU UFS_PHY_CONTROL 0x14060724; Silicium's UEFI has UniPro at 0x11130000 (base + 0x10000), the Samsung kernel and its device tree at 0x11110000 | device tree `ufs@11120000` (its reg, `ufs-phy`, `ufs-phy-sys`); the Samsung kernel's `ufs-exynos.c`; Silicium `PlatformUfsLib` |
 | GPU | Mali-G72 MP18 at 0x17500000 (GPU_ID >> 16 = 0x6221); SPI 282/281/283 (job, MMU, GPU); power domain `pd-embedded_g3d` (PMU 0x14064040/44); PLL_G3D in CMU_G3D 0x17400000 | device tree `mali@17500000`; ExyHyperBrick's kernel (G3D CAL) |
 
 The device tree is Samsung's own (Silicium's `Resources/DTBs/starlte.dts`). Pull your phone's
@@ -185,8 +185,7 @@ root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to S
 partition read through the loader). The small root for it is built with `ALONE=1 RC=rc.launchd`.
 
 
-There is no Exynos UFS driver in the kernel, and none is needed for reading. Silicium's UEFI drives the UFS and stays
-resident. With `ufs=2 bootcpu=4 cpus=8`, the loader keeps core 0 and reads for the kernel, which runs on the other seven: the same
+Silicium's UEFI drives the UFS and stays resident. With `ufs=2 bootcpu=4 cpus=8`, the loader keeps core 0 and reads for the kernel, which runs on the other seven: the same
 service the POCO uses (`drivers/storage/hakios.ufs.c`). Every GPT partition becomes `/dev/ufs_NAME`, read-only, and
 `root_apfs=ufs_NAME` mounts iOS's root volume from one.
 
@@ -199,6 +198,36 @@ decides what is lost:
 List the partitions and their sizes first: `adb shell ls -l /dev/block/by-name`.
 Then: `devices/starlte/mkimage.sh cpus=8 bootcpu=4 exynos_keys=1 ufs=2 root_apfs=ufs_NAME`. Nothing writes to the flash: `ufs_write=1` is for the
 POCO's `darwin` partition only, and the loader refuses any other.
+
+**The kernel's own UFS driver** (`drivers/storage/hakios.ufshc.c`, `ufs_native=4 ufs_native_soc=exynos9810`, off by default;
+written, not yet seen on the phone) drives the controller itself instead, with no core kept back for the loader. It does not
+reset or bring up anything: it takes the controller as Silicium's UEFI left it (HS-G3, two lanes), reads back what UEFI set
+up, and gives it back as it was at the end. It goes in steps, `ufs_native_step=N`, 1 by default:
+
+| Step | What it does | What it writes |
+|---|---|---|
+| 1 | look: UFSHCI and vendor registers, the PHY's power (PMU), the device's reset line, the clock gating, IO coherency, UEFI's own descriptors (their PRDT entry size: the FMP's descriptor type) | nothing |
+| 2 | the link: lanes, gears, power mode and series by DME_GET; UniPro's last results; the PHY's calibration read back | DME_GET's registers only |
+| 3 | NOP OUT through the kernel's own transfer list, then UEFI's list back | its own list |
+| 4 | each unit's descriptor, TEST UNIT READY, READ CAPACITY; UEFI's list back | its own list |
+| 5 | LBA 0 and each unit's GPT; `/dev/ufs_NAME` for every partition, read only | its own list |
+
+It is read only. `ufs_native_write=NAME` alone makes one partition writable, and never EFS, SEC_EFS, CPEFS, BOOT, RECOVERY,
+PARAM, PERSISTENT, STEADY, RADIO or the rest of the boot chain (the list is in `drivers/storage/hakios.ufs.c`), nor a
+boot or write-protected unit; the controller's driver refuses any write outside that partition's blocks again. Leave it
+unset. Without `ufs=2`, the root comes from the image (the small root, `-s`). The first runs, one image each, the log read
+in TWRP after each:
+
+```sh
+devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810                     # step 1
+devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=2   # the link
+devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=3   # NOP OUT
+devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=4   # READ CAPACITY
+devices/starlte/mkimage.sh -s 60 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=5   # the GPTs, /dev/ufs_*
+```
+
+Each step says what it found (`ufs: own: ...`) and stops with `ufs: own: step N done`; go on only when it says what
+the table above expects.
 
 ## Touch
 
