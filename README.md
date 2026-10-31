@@ -294,6 +294,11 @@ domain the boot left on is left on, with the rail at 950 mV under it. Start with
 OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with `GL=1`). Written and checked against Samsung's
 kernel (CAL, kbase, ACPM, the device tree) and the S9+ port; not yet run on the phone.
 
+How programs reach it, what Mesa's panfrost and the kernel's service were checked to agree on, why Metal goes through
+panfrost and not panvk, and the runs after `mali=9` (mali_test, the window server, gl_test, Metal): [GPU.md](GPU.md).
+Programs' buffers get GPU addresses between 32 MB and 4 GB, given back when freed, code kept off 16 MB lines, as Linux
+panfrost gives them and Mesa expects.
+
 ## Vibration and the flashlight
 
 `max77705_haptic=1` gives iOS the vibration motor: the MAX77705's haptic block (the same chip as the charger: two of
@@ -411,6 +416,9 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 20 | `usb_gadget=3` | "3: reset done in N us", "DWC3 set up: ... DCTL ... event buffer ..."; "did not finish in 500 ms" means the PHY gives the link no clock |
 | 21 | `usb_gadget=4`, the cable in a Linux host running `dmesg -w` | the host: a new high-speed device 1209:0001 and ttyACM0; the phone: "bus reset 1", "connected at high speed", "setup 1: 80 06 0100 ...", "address N", "configured"; with none, "waiting for a host: line ..." every 10 s (then `usb_gadget_ldo=1`, or `usb_gadget_fs=1`) |
 | 22 | `usb_gadget=5`, `-s 300` | the whole log on the host as it is written (above); `help`, `stat`, then `return`: the phone restarts into TWRP and the host's log ends with the run's last lines |
+| 23 | `mali=9`, root `GL=1 NO_AIR=1` with `gl=0` | "mali_test: 4: ... the word 0xc0ffee01 -- THE GPU WROTE IT" ([GPU.md](GPU.md), run G1) |
+| 24 | `mali=9`, the same root | "HakiosMali: a client opened the GPU" (backboardd), and every minute "M job chains (0 failed)" with M growing; then `RC_JOBS=rc.jobs.gltest`: "mali: gl_test drew on THE MALI" (G2, G3) |
+| 25 | `mali=9`, root `GL=1` (with the AIR library) and `RC_JOBS=rc.jobs.malimetal` | "the compiler library Mali-G72 ...", "drvtest: dispatched image_calcminmax0: status 4", the drawn pixel equal to softpipe's (M1) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
