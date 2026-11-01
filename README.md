@@ -89,9 +89,30 @@ the kernel A55s 2 and 3, the only cores it can have so far (seen on the phone, 3
 - core 1: S-Boot powers it up and parks it before the hand-over, so CPU_ON for it never brings it to the kernel (the loader
   leaves it out: `platform_starlte.parked_cores`);
 - the M3s: the firmware's CPU_ON for one (Carbon, then Samsung's EL3) never returns, and the processor that asked stays
-  inside it for good (patch 1505's log);
+  inside it for good (patch 1505's log). The likely reason, from source (below): six PMU fields of the big cluster that
+  Samsung's kernel writes before it starts any other core, and nothing here did. `m3_prep=N` writes them;
 - the A55s' own MPIDR has them one affinity field up (core 2 reads 0x81000200, MT set) from the numbers the device tree and
   the firmware use (0x2); the kernel notices and translates (patch 1504).
+
+Why the M3s' CPU_ON hangs, and what goes first (written, not yet seen). Samsung's kernel, before `smp_init`, runs the
+PMU's "lpm init" sequence (`pmucal_lpm_init`, from `cal_if_init` in the clock driver's init); six of its entries are the
+big cluster's: `CPU_QCH_CLUSTER1_NONCPU_SYS_PWR_REG` (PMU +0x1088) [31:24] = 0x8D, and `MEMORY_CLUSTER1_CPU0..3_OPTION`
+(+0x2114, +0x2180, +0x21EC, +0x2258) and `MEMORY_CLUSTER1_NONCPU_OPTION` (+0x2384) [1:0] = 2 (BSP
+`drivers/soc/samsung/cal-if/exynos9810/flexpmu_cal_system_exynos9810.h`, lines 4 and 29-33). S-Boot leaves 0xC7 and 1 there.
+The mainline Linux port to the S9+ found that without these writes CPU_ON for an M3 answers 0 and the core never
+arrives, and with them all eight cores come up (its `scripts/build/patch_tree.py`, "M3 cluster: vendor PMU defaults
+before PSCI CPU_ON"); behind Carbon the call does not answer at all, as Samsung's EL3 seems to wait for the core it starts
+(an A55's CPU_ON answers 76 us after the call, 9 us before that core is in the kernel). Nothing else is done to the big
+cluster before its first CPU_ON on Android: the hot-plug callbacks (`exynos-powermode.c`) run on the new core once it is
+up, ACPM and cpufreq start later, and `uh_init` is not configured in this BSP. Nothing in Silicium or Carbon touches
+the cluster (Carbon forwards CPU_ON to EL3 through a trampoline, the same for both clusters).
+
+`drivers/core/hakios.exynos_m3.c` (patch 1508 asks it before every CPU_ON) does it in steps, each logged before it is
+taken: `m3_prep=1` reads and logs the cluster's PMU state, the six fields, the cpucl0/cpucl1 DVFS rates and BUCK2/BUCK3
+(vdd_cpucl1/vdd_cpucl0) before the first CPU_ON of the boot; `m3_prep=2` also writes the six fields, only those bits,
+each read back; `m3_prep=3` also lets the M3s be started. Steps 1 and 2 are for `cpus=2 bootcpu=2`; below 3 an M3 the
+kernel is given is refused (not started), not hung on. The S9+ port also found that an M3 does not come back after a
+CPU_OFF, nor from a cluster power-down: this kernel idles with WFI and starts each core once.
 
 The M3s implement ARMv8.0, while the A55s and the iPhone X's A11 implement 8.2. That does not keep iOS off them: a count
 over three files of the iPhone X's shared cache (57.6 million words) found 7088 `LDAXR`s and 7208 `STLXR`s, the 8.0 way of
@@ -419,6 +440,10 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 23 | `mali=9`, root `GL=1 NO_AIR=1` with `gl=0` | "mali_test: 4: ... the word 0xc0ffee01 -- THE GPU WROTE IT" ([GPU.md](GPU.md), run G1) |
 | 24 | `mali=9`, the same root | "HakiosMali: a client opened the GPU" (backboardd), and every minute "M job chains (0 failed)" with M growing; then `RC_JOBS=rc.jobs.gltest`: "mali: gl_test drew on THE MALI" (G2, G3) |
 | 25 | `mali=9`, root `GL=1` (with the AIR library) and `RC_JOBS=rc.jobs.malimetal` | "the compiler library Mali-G72 ...", "drvtest: dispatched image_calcminmax0: status 4", the drawn pixel equal to softpipe's (M1) |
+| 26 | `m3_prep=1` | "m3: m3_prep=1: 1: the big cluster's state, before CPU_ON for cpu 1 (MPIDR 0x3)", the CLUSTER1 STATUS words (0 off), each of the six fields "NOT as Samsung's kernel leaves it" (expected: 0xC7..., 1), "DVFS cpucl1 N kHz ... BUCK2 ... mV"; then the boot as run 1 |
+| 27 | `m3_prep=2` | "m3: 2: CPU_QCH_CLUSTER1_NONCPU_SYS_PWR_REG (PMU +0x1088): c7...... -> 8d......" and five OPTION lines, "the six CLUSTER1 fields hold Samsung's values", the state "after the writes"; then the boot as run 1 (nothing else changes) |
+| 28 | `m3_prep=3 cpus=3 bootcpu=2` (in place of `cpus=2`) | "m3: 3: CPU_ON for cpu 2 (MPIDR 0x100) next", "psci: cpu 2: the firmware answered 0 (success)", "stage 3", "3 of 3 processors are running". A hang after "CPU_ON with entry" is the old one: then the fields were not the cause (the watchdog restarts into TWRP) |
+| 29 | `m3_prep=3 cpus=6 bootcpu=2` | the four M3s, each "answered 0" and "stage 3", "6 of 6 processors are running". (`bootcpu=4` stays out: the loader starts the boot core itself, before this kernel can write the fields) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
