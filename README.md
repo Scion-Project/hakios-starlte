@@ -306,6 +306,15 @@ its registers written, in their haptic bits only, each read back) driven by chan
 driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
 restart puts it out; never above Android's 60 mA). Both are off on the default command line until seen working.
 
+## The cameras
+
+`drivers/camera/hakios.exynos_camera.c` (`cam_s9=N`, built in, off by default) is stage 1 of the front camera, the
+S5K3H1: `cam_s9=1` looks (the S2MPB02's camera LDOs, CIS_CLK1, the pins), `cam_s9=2` powers the sensor up in Android's
+order (three LDOs of the S2MPB02 at Android's voltages, reset, MCLK at 26 MHz), reads its model ID over I2C (0x35 on
+USI08_I2C of PERIC1) and powers it down. [CAMERA.md](CAMERA.md) has the hardware of both cameras and the plan: raw
+RAW10 frames through CSIS1's own DMA without the ISP's libraries, into the `/dev/hakios-camera` that iOS's capture
+stack already reads on the POCO.
+
 ## Wi-Fi, stage 1
 
 `drivers/wifi/hakios.exynos_pcie.c` (`wifi_pcie=N`, built in, off by default): the Exynos 9810's PCIe root complex of
@@ -402,6 +411,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 6 | `max77705=1 max77705_steps=1`, then `_steps=4` | "version N, revision N", "now: NN.NN%, NNNN mV ..."; `max77705_ipclk=` if the clock logged differs |
 | 7 | `max77705=1 max77705_haptic=1` | "haptic: the motor for iOS ... PWM 1270 ticks of 26000000 Hz" |
 | 8 | `torch=1`, then `torch=2 torch_secs=2` | "ID ...; FLED_CTRL1 ..., CTRL2 ..." (reads only), then lit for 2 s at 60 mA |
+| 8a | `cam_s9=1`, then `cam_s9=2` | "S2MPB02 ID ...", the LDOs "off"; then "THE SENSOR ANSWERS: model ID 0x...." and "powered down ... off as found" ([CAMERA.md](CAMERA.md)) |
 | 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
 | 10 | `abox=1` up to `abox=6`, one step a run | "the AUD domain is on", "IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648xxx Hz", "UAIF1_CTRL1 ... reads 0x984f000", the sample banks ([AUDIO.md](AUDIO.md)) |
 | 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
