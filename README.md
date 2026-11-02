@@ -419,7 +419,10 @@ picocom -q /dev/ttyACM0                # the console: type help and Enter (the p
 ```
 
 The console's commands: `help`, `stat` (the link's counters), `uptime`, `sysctl NAME`, `log` (the kernel's log again from
-its start), `return` (end the run: the loader restarts the phone into TWRP). It is the kernel's, not a shell.
+its start), `shot [N]` (the panel's picture, every Nth pixel, as a framed binary blob; the log is held back while it goes
+out), `return` (end the run: the loader restarts the phone into TWRP). It is the kernel's, not a shell.
+`tools/usb-shot.py -n 4 -o s9.png --log s9-run.log` (in the kernel tree; stop the `cat` loop above first, `--log` keeps
+its file going) sends `shot 4` and writes the picture as a PNG: 360x740 from the 1440x2960 panel, some 0.8 MB.
 Written, not yet run; the descriptors and requests are checked on the host (`tools/usb-acm-test.sh`). Not known: whether
 the MAX77705's switch routes D+/D- to the SoC while HakiOS runs (step 4's "waiting for a host: line ..." says what the
 PHY sees), and whether S-Boot leaves the clocks open.
@@ -463,6 +466,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 27 | `m3_prep=2` | "m3: 2: CPU_QCH_CLUSTER1_NONCPU_SYS_PWR_REG (PMU +0x1088): c7...... -> 8d......" and five OPTION lines, "the six CLUSTER1 fields hold Samsung's values", the state "after the writes"; then the boot as run 1 (nothing else changes) |
 | 28 | `m3_prep=3 cpus=3 bootcpu=2` (in place of `cpus=2`) | "m3: 3: CPU_ON for cpu 2 (MPIDR 0x100) next", "psci: cpu 2: the firmware answered 0 (success)", "stage 3", "3 of 3 processors are running". A hang after "CPU_ON with entry" is the old one: then the fields were not the cause (the watchdog restarts into TWRP) |
 | 29 | `m3_prep=3 cpus=6 bootcpu=2` | the four M3s, each "answered 0" and "stage 3", "6 of 6 processors are running". (`bootcpu=4` stays out: the loader starts the boot core itself, before this kernel can write the fields) |
+| 30 | run 29's arguments and `cohtest=1` | 30 s after start-up: a "cohtest: cpu N ... MPIDR ... CTR ..." line for each processor, "cohtest: A55 cpu N (MPIDR 0x2) and M3 cpu N (MPIDR 0x100)", steps 0 to 7c each "0 of 128 lines wrong: ok" (step 1: "100000 of 100000 rounds, 0 stale ... 0 stuck"), then "cohtest: verdict: COHERENT" or "NOT COHERENT: n of 9 checks failed" (the head of hakios.exynos_m3.c says how to read which). `cohtest=3` runs it three times, 30 s apart, while the screen draws |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
