@@ -31,7 +31,9 @@ S-Boot (Samsung's, unlocked)  -->  boot image on BOOT      -->  HakiOS UEFI     
   Silicium commit of 2026-10-09, older than Carbon's update of 2026-10-13.
 - **This port's change to the platform** (`uefi/files/`): the region the payload is copied to, 0xF0000000 + 64 MB, is
   reserved in the memory map. In Samsung's device tree that is the modem's region (`modem_if`); Android's `cbd` puts the modem
-  image there and the boot loader does not, and HakiOS starts no modem.
+  image there and the boot loader does not. It is only where the payload lands: the shim and the boot manager in the prebuilt
+  UEFI are fixed to it. The loader moves the payload out first thing (`payload_move`, to 0xD0000000) and keeps the CP's and
+  ABOX's memory from UEFI and XNU (Memory layout, below), so that a modem driver can have 0xF0000000-0xFB1FFFFF whole.
 - **The image** (`mkxnuimg.py`, `UEFI_TARGET=starlte`): an Android boot image (header v1) whose kernel is the boot shim, the
   UEFI image and the payload, **uncompressed and without a device tree** (Samsung's boot loader takes the device tree from
   the phone's own `dtb` partition and does not unpack a gzip), as Silicium's `starlte.toml` says.
@@ -65,6 +67,7 @@ A driver's "Sources" comment names files of the kernel fork at the commit below.
 |---|---|---|
 | RAM | 4 GB: 0x80000000-0xFFFFFFFF and 0x880000000 on; secure holes taken out by Silicium's RamManagerLib | Silicium `SamsungPkg/Library/RamManagerLib`, the device tree's `androidboot.dram_info` |
 | Kernel window | the largest free block UEFI reports (the loader's choice) | `xnuloader/loader.c` `choose_window()` |
+| Memory layout | see "Memory layout" below | the device tree's `reserved-memory`, this port's UEFI memory map, `xnuloader/loader.c` |
 | Interrupts | GIC-400 (GICv2): distributor 0x10101000, CPU interface 0x10102000 | device tree `interrupt-controller@10100000` (`arm,cortex-a15-gic`) |
 | Timer | the architected timer, 26 MHz; virtual timer PPI 27 | device tree `timer` |
 | Cores | 0-3 Cortex-A55 ("ananke", MPIDR 0x000-0x003), 4-7 Exynos M3 ("meerkat", 0x100-0x103); PSCI by SMC | device tree `cpus`, `psci` |
@@ -79,6 +82,35 @@ The device tree is Samsung's own (Silicium's `Resources/DTBs/starlte.dts`). Pull
 [WoA port for the S9+](https://github.com/ntdevlabs/exynos9810-woa) and
 [ExyHyperBrick's kernel](https://github.com/ExyHyperBrick/android_kernel_samsung_exynos9810) (GPL-2.0: read for facts, never
 copied into this tree) are the references for the drivers still to write.
+
+## Memory layout
+
+RAM is 0x80000000-0xFFFFFFFF and 0x880000000-0x8FFFFFFFF (4 GB). Where everything is during a run, from low to high, with
+where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI: `uefi/files/.../MemoryMapLib.c`; L: the loader,
+`xnuloader/loader.c`). The loader's two `layout:` lines say the run's own values.
+
+| Range | What | Source |
+|---|---|---|
+| 0x80000000 + 4 KB | `sec_debug_magic` | DT |
+| 0x8F000000 + 2 MB, + 256 KB, + 60 MB | the UEFI image, its stack, the DXE heap | UEFI |
+| 0x91300000 + 4 KB | `zswap_debug` | DT |
+| 0xA1000000 | the loader's image (`/base`), its buffers with it: the UFS page given to the kernel as `ufs_shared_pa` (0xa1456000 in a run) | L, `build.sh` |
+| 0xAF800000 + 32 MB, 0xB8000000 + 2 MB, 0xC0000000 + 512 KB | `rkp_region`, `tima_region` (disabled), `seclog_mem` | DT |
+| 0xCC000000 + 0x1043000 | the panel's buffer (GOP), reserved | UEFI, DT `s3cfb.bootloaderfb` |
+| **0xD0000000 + 64 MB** | **the payload, moved here at the start** (a step of 64 MB up if that is taken); its last MB the panic log (`pram`) | L `payload_home` |
+| 0xE1900000 + 30 MB | `secure_camera`, reserved | DT, UEFI |
+| 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
+| **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |
+| **0xF9200000-0xFB1FFFFF** | **`cp_ram_logging`** | DT |
+| **0xFB200000-0xFD9FFFFF** | **`abox_rmem`** (calliope's; our ABOX driver runs without it and does not use it) | DT |
+| 0xFDA00000-0xFF607FFF | `exynos_ss`: its header 0xFDA00000, `log_kernel` 0xFDA10000 (the kernel's log for TWRP with `esslog=1`), ..., `log_pstore` 0xFED10000 + 32 KB (the loader's RAM log and ramoops' record; reserved in UEFI) | DT, UEFI |
+| 0xFF800000 + 8 MB | `fimc_is_lib`, no-map | DT |
+| 0x880000000 + 2 GB | XNU's RAM: the largest free block (`physBase`, `memSize`); in it the kernel at +48 MB, the ramdisk after it, the device tree (64 KB) and `boot_args` after that | L `choose_window`, `run_kernel` |
+
+The three ranges in bold from 0xF0000000 to 0xFD9FFFFF are the platform's keep-outs: at the start the loader takes every free
+page of them from UEFI as reserved memory (`keep_out_reserve`), so nothing UEFI hands out while it stays alive beside the kernel
+lands there, and XNU's window is never allowed to cover them. XNU's memory is only `[physBase, physBase + memSize)`, so it never
+has them as free memory.
 
 ## The cores
 
