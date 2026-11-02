@@ -259,6 +259,65 @@ devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=ex
 Each step says what it found (`ufs: own: ...`) and stops with `ufs: own: step N done`; go on only when it says what
 the table above expects.
 
+## /private/var kept between runs: USERDATA
+
+Without it `/private/var` is a memory filesystem, empty at every boot (and about 1 GB). With `ufs_write=1
+var_hfs=ufs_USERDATA_data` it is HFS Plus in Android's USERDATA, given up for it: all 52 GB, journaled, kept between
+runs. This is the POCO's data volume (`docs/u-boot.md` in the kernel repository, "The data volume") with USERDATA in
+place of the POCO's `darwin`. It is written, and not yet seen on the phone.
+
+- **Writes go through the loader**, as the reads do (`ufs=2`): the loader calls Silicium's `UfsDxe` `WriteBlocks` on
+  core 0. The kernel's own UFS driver (`ufs_native_write=`) is not used: none of its steps has run on the phone yet.
+- **Only USERDATA is ever written.** The loader's starlte platform names it (`data_part`). The loader serves writes
+  only to the partition of exactly that name, only if it is a partition (not a unit) on unit 0, at least 1 GiB in blocks
+  of 4096, as long as its GPT entry says and writable as UEFI gives it out, and only with `ufs_write=1`. The kernel
+  (`drivers/storage/hakios.ufs.c`) takes the loader's offer only for that name and block 0, and refuses any request
+  outside the partition. UEFI's partition driver bounds it a third time. EFS, BOOT, RECOVERY, SYSTEM and the rest are
+  never offered. Without `ufs_write=1`, nothing writes, as before.
+- **A bad partition cannot stop the boot.** If `/dev/ufs_USERDATA_data` is missing (an older loader, no `ufs_write=1`)
+  or the volume does not mount (not formatted, damaged), init says `HFS Plus from /dev/ufs_USERDATA_data: ...; a
+  memory filesystem instead` and the boot goes on with the RAM `/private/var`.
+- **Seeding.** On the kept volume init makes only the template's directories and files that are not there yet
+  (`etc/var.skel`), and empties `tmp`, `run` and `vm`. The rest is what earlier runs left. It prints which run of the
+  volume this is (`/private/var/hakios-runs`) and what is in `/private/var/mobile/Library/Logs/CrashReporter`.
+- **The end of a run.** Before the return to the loader (`-s`, or `return` on the USB console) the kernel syncs the
+  file systems (`ufs: the run is ending: the file systems synced ...`). A hard hang or a panic misses that sync, and
+  the journal makes the volume whole at the next mount. Silicium's `FlushBlocks` does nothing, so the order the
+  journal asks for depends on the UFS device's own write cache.
+
+**Once, from TWRP: the empty volume.** `tools/mkdatavol.py --userdata BLOCKS OUTDIR /sbin/newfs_hfs` (on a Mac, or
+with `mkfs.hfsplus` on Linux) makes it for USERDATA's size in blocks of 4096. This phone's USERDATA is LBA
+2000768..15615994 of unit 0: 13615227 blocks, 55767969792 bytes. Only the blocks the volume uses are written: the
+first 1 GB (headers, bitmap, catalog, journal) and the last block (the alternate header). **This erases Android's
+data.** TWRP can no longer mount `/data` or `/sdcard` after it, so push images to `/tmp`. TWRP's Wipe > Format Data
+makes it ext4 again.
+
+```sh
+adb push userdata-head.img.gz userdata-tail.img /tmp/
+adb shell blockdev --getsize64 /dev/block/by-name/USERDATA    # must say 55767969792; stop if not
+adb shell 'umount /sdcard; umount /data'                      # nothing may have it mounted (errors are fine)
+adb shell 'D=$(readlink -f /dev/block/by-name/USERDATA); grep "$D" /proc/mounts; ls /sys/class/block/${D##*/}/holders'
+                                                              # must print nothing: not mounted, no dm-crypt on it
+adb shell 'gunzip -c /tmp/userdata-head.img.gz | dd of=/dev/block/by-name/USERDATA bs=4194304'
+adb shell dd if=/tmp/userdata-tail.img of=/dev/block/by-name/USERDATA bs=4096 seek=13615226
+adb shell sync
+adb shell 'dd if=/dev/block/by-name/USERDATA bs=4096 count=253090 | sha256sum'   # userdata.txt's head sha256
+adb shell 'dd if=/dev/block/by-name/USERDATA bs=4096 skip=13615226 count=1 | sha256sum'   # userdata-tail.img's
+```
+
+What the log of a run says (pstore or `usb_gadget=5`):
+
+| Where | Line |
+|---|---|
+| loader | `ufs: USERDATA (LBA 2000768..15615994 of unit 0): the data volume, all of its blocks may be written this run` |
+| kernel | `ufs: /dev/rufs_USERDATA takes writes, whole blocks from 0 on (53184 MB of it)`, then `/dev/ufs_USERDATA_data: ... writes flushed when the file system asks` |
+| init | `/private/var: HFS Plus from /dev/ufs_USERDATA_data, kept between boots`, `[ ok ] mount the data volume on /private/var`, `run N on this data volume` |
+| end | `ufs: synced (0); N writes, M MB this run`, and the loader's `ufs: N writes into USERDATA, ...; 0 refused` |
+
+Run it twice: the second run says `run 2 on this data volume: what the runs before wrote is here`. Crash reports:
+the system image's job list leaves out `ReportCrash` and `osanalytics` (`userland/mkjobs.py`, DENY), so nothing writes
+`/private/var/mobile/Library/Logs/CrashReporter` yet. That needs an image built with `ALLOW="ReportCrash osanalytics"`.
+
 ## Touch
 
 `drivers/input/hakios.s6sy761.c` (`s6sy761=1`, off by default until it has been seen working). Its first run on the phone should go one step at a
@@ -484,6 +543,6 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
 | Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, INTx, the phone's address, the station, joining) are written: `wifi_pcie=1..6`, then `brcmfmac=1..8`, one run each ([WIFI.md](WIFI.md)); not yet run |
 | A longer log | USB is written (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
-| Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
+| Storage, writing | /private/var kept in USERDATA is written (above); first runs, then an image with ReportCrash allowed for crash reports |
 | Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
 | The M3s | the ISA question above, then a loader that numbers two clusters |
