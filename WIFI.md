@@ -127,9 +127,13 @@ The kernel has the driver only if `tools/mk-brcmfmac.sh` ran before it was built
 - 3: `Invalid shared RAM address` or no answer in 5 s: Samsung's firmware not starting under brcmfmac's download (it
   writes a random seed only for `WCC_SEED` chips; bcmdhd's own steps before the download are where to look next).
   `Unsupported PCIE version`: the firmware's msgbuf revision is outside brcmfmac's 5 to 7.
-- 4: the first command timing out (`brcmf_msgbuf_query_dcmd: Timeout on response`): the chip cannot reach memory. That is
-  the open question of the PCIe SysMMU (0x11420000) and the controller's inbound path; the next step is then to look at
-  whether Android's SysMMU leaves the controller's stream in bypass, and at SYSREG_FSYS1 +0x700 (I/O coherency).
+- 4: the first command timing out (`brcmf_msgbuf_query_dcmd: Timeout on response`): the chip cannot reach memory. The
+  radio's reads and writes cross the PCIe SysMMU (0x11420000), whose clock (CMU_FSYS1 +0x2098) was off until wifi-a5: a
+  read of its registers then stopped the bus (wifi-a4: `Kernel data abort` in `hakios_exynos_pcie_say_dma()`). Step 6 now
+  says the data path's gates (`exynos_pcie: 6: the data path: gate ...`), forces the SysMMU's on, says its CTRL and sets
+  it to 0 (addresses passed through). `wifi_pcie_coherent=1` also sets SYSREG_FSYS1 +0x700 bits 9:8 (Android's
+  use-cache-coherency) and keeps the radio's memory cached; without it the memory is uncached. The driver's state at a
+  failed setup is said again on the USB console (`wifi: what the driver said of itself when its setup failed`).
 - 5: the first command timing out only with INTx: the chip's INTA does not reach the GIC. The driver's line when it
   lets INTx go counts what arrived and how often the latch held more than INTA; next to look at are ELBI's
   `PCIE_IRQ_PULSE` bits and whether the endpoint's command bit 10 (INTx disable) is set.
@@ -143,7 +147,7 @@ The kernel has the driver only if `tools/mk-brcmfmac.sh` ran before it was built
 ### What remains
 
 - Roaming (off), power saving, WPA3 and enterprise networks, protected management frames, more than one network.
-- The PCIe SysMMU, if step 4 shows the chip cannot reach memory without it.
+- The PCIe SysMMU translating (Android's 1:1 table), if step 4 shows the chip cannot reach memory with it passing through.
 
 ### The files: firmware, NVRAM, CLM
 
