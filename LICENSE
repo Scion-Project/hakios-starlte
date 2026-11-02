@@ -1,0 +1,46 @@
+hakios-starlte: the Galaxy S9's device repository for HakiOS (Scion-Project)
+
+This repository is checked out at devices/starlte of Scion-Project/hackios-xnu-kernel. Its LICENSE says
+that the device layer under devices/ is under the MIT License. The same terms apply here, by directory:
+
+1. Our own files (the configuration in configs/ and soc/, device.conf, mkimage.sh, the documentation):
+   the MIT License below.
+
+2. uefi/files/: changes to Project Silicium's Mu-Silicium (starltePkg). As derived parts, they keep the
+   upstream licence, BSD-2-Clause-Patent.
+
+3. prebuilt/: SILICIUM_UEFI.fd and BootShim.bin are built from Mu-Silicium with the changes in uefi/.
+   They are under BSD-2-Clause and BSD-2-Clause-Patent, and the UEFI image carries Project Silicium's
+   Carbon Hypervisor (GPL-2.0, source at github.com/Project-Silicium/Carbon-Hypervisor).
+   mkbootimg.py is AOSP's, under Apache-2.0. prebuilt/README.md has the details.
+
+4. firmware/audio/: Samsung's audio firmware binaries, unchanged (firmware/audio/README.md says where they
+   come from). They belong to their owners and are not licensed by this repository.
+
+The kernel drivers this device uses are in the common repository, under its LICENSE (APSL 2.0 for the
+kernel). Samsung's GPL-2.0 kernel sources were read for facts (addresses, fields, sequences) and are not
+copied here.
+
+----------------------------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2025-2026 the HakiOS authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

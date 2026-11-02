@@ -11,8 +11,13 @@ repository, as the POCO's are: `drivers/core/hakios.exynos_hsi2c.c`, `drivers/in
 `hakios.s6sy761.c`, `drivers/power/hakios.max77705.c`, `drivers/gpu/hakios.s6e3ha8.c` and `hakios.mali.c`/`.cpp`; and so
 are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 
-**State: written, not yet run on the phone.** The kernel's and loader's half is tested in QEMU with the same interrupt
-controller (`qemu/run.sh` with `QEMU_GIC=2`). What is known and what is not is below; `device.conf` is the record.
+**State: iOS 16.5 runs on the phone.** Seen on the phone (1 and 2 November 2026): six cores (`cpus=6 bootcpu=2 m3_prep=3
+pan=0`, The cores), touch, the battery's level and charger state, vibration, the kernel's live log and a console over
+USB, the GPU through Mesa's Panfrost (`mali=9`), and the A55s' clock through ACPM's DVFS (`cpufreq_lit=1794000`).
+Written but not yet confirmed: brightness from iOS's slider (`backlight=2`). Written but not yet tested on the phone:
+the cameras, speaker audio, Wi-Fi, Bluetooth, temperatures, the flashlight and the kernel's own UFS driver. The
+kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
+`device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
 ## How it starts
 
@@ -132,13 +137,19 @@ none is needed for the boot. Booting on an M3 (`bootcpu=4`) has not been tried.
 
 ## Build
 
+In the kernel's common repository, with this repository at `devices/starlte` (`tools/hakios-device.py sync starlte`):
+
 ```sh
+make unpack IPSW=/path/to/iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw   # your own IPSW, once (sysimage/unpack.sh)
 make starlte_defconfig && make kernel        # the common kernel, no driver of another phone (configs/starlte.config)
 make loader                                  # with the iPhone identity from your own IPSW
 (source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 bash build.sh)   # the small root, the whole root here (ALONE=1)
 devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root
 devices/starlte/mkimage.sh -s 300 cpus=2 bootcpu=2 exynos_keys=1     # the same with other boot-arguments
 ```
+
+To install iOS on the phone's flash with one TWRP zip, build the system image too (`make images`), then use
+[scion-packaging](https://github.com/Scion-Project/scion-packaging)'s `starlte/mkinstaller.sh` (Storage, below).
 
 Samsung has no `fastboot boot`, and Silicium's UEFI has no USB gadget, so there is no resident loader to send runs to as
 on the POCO (the kernel's own USB link, below, gives the log and a console, not a way to send runs). Each run is an image, and the run returns to the loader by itself after `-s` seconds. The loader then keeps
@@ -261,7 +272,7 @@ the table above expects.
 
 ## Touch
 
-`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, off by default until it has been seen working). Its first run on the phone should go one step at a
+`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, off in the configuration's default arguments, on in the installer's; seen working on the phone, 1 November). Its first run on the phone should go one step at a
 time: `s6sy761_steps=1` only reads (the bus's clock divider among other things: if it says the HSI2C's input clock is not
 200 MHz, `s6sy761_ipclk=` corrects the timing); 4 asks the chip its boot status, which should be 0x20 (its firmware
 running, powered as the boot loader left it); 6 is touch. The coordinates are the chip's own range (its panel
@@ -269,7 +280,7 @@ information, else 0-4095 on both axes), spread over the whole panel, which is wh
 
 ## Battery
 
-`drivers/power/hakios.max77705.c` (`max77705=1`, off by default until it has been seen working) reads the MAX77705's fuel gauge (0x36) and charger
+`drivers/power/hakios.max77705.c` (`max77705=1`, off in the configuration's default arguments, on in the installer's; seen working on the phone, 1 November) reads the MAX77705's fuel gauge (0x36) and charger
 (0x69) on CMGP's HSI2C every 5 seconds, and hands the charge, voltage, current, capacity, cycles and charger state to
 iOS's power source. It never writes the chip. The temperature is the battery's thermistor (channel 4 of CMGP's ADC,
 through the phone's own table), as Android reads it. Touch and battery share `drivers/core/hakios.exynos_hsi2c.c`.
@@ -322,7 +333,8 @@ domain the boot left on is left on, with the rail at 950 mV under it. Start with
 (`mkimage.sh cpus=2 bootcpu=2 mali=1 ...`); `sysctl kern.hakios.mali` says the last step done. With 9,
 `/redwood/bin/mali_test` (run by rc.jobs) checks the program side without Mesa, and the window server draws with
 OpenGL ES through Mesa's panfrost (`tools/mesa`, the root built with `GL=1`). Written and checked against Samsung's
-kernel (CAL, kbase, ACPM, the device tree) and the S9+ port; not yet run on the phone.
+kernel (CAL, kbase, ACPM, the device tree) and the S9+ port. Seen on the phone (1 November): `mali=9` ran ("THE GPU
+WROTE IT"), and CoreAnimation draws through Mesa's Panfrost. Metal on the Mali has not been run yet.
 
 How programs reach it, what Mesa's panfrost and the kernel's service were checked to agree on, why Metal goes through
 panfrost and not panvk, and the runs after `mali=9` (mali_test, the window server, gl_test, Metal): [GPU.md](GPU.md).
@@ -334,7 +346,8 @@ panfrost gives them and Mesa expects.
 `max77705_haptic=1` gives iOS the vibration motor: the MAX77705's haptic block (the same chip as the charger: two of
 its registers written, in their haptic bits only, each read back) driven by channel 1 of the SoC's PWM, as Samsung's
 driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
-restart puts it out; never above Android's 60 mA). Both are off on the default command line until seen working.
+restart puts it out; never above Android's 60 mA). Both are off on the configuration's default command line. The vibration
+has been felt on the phone (1 November, on in the installer's arguments); the flashlight is written, not yet seen.
 
 ## The cameras
 
@@ -420,13 +433,14 @@ picocom -q /dev/ttyACM0                # the console: type help and Enter (the p
 
 The console's commands: `help`, `stat` (the link's counters), `uptime`, `sysctl NAME`, `log` (the kernel's log again from
 its start), `return` (end the run: the loader restarts the phone into TWRP). It is the kernel's, not a shell.
-Written, not yet run; the descriptors and requests are checked on the host (`tools/usb-acm-test.sh`). Not known: whether
-the MAX77705's switch routes D+/D- to the SoC while HakiOS runs (step 4's "waiting for a host: line ..." says what the
-PHY sees), and whether S-Boot leaves the clocks open.
+Seen on the phone (1 November): it enumerates at high speed as 1209:0001, the log streams live, and the console's
+`return` ends a run into TWRP. The MAX77705's switch has to route D+/D- to the SoC: `max77705_usbsw=1` (with
+`max77705=1`) does it. The descriptors and requests are also checked on the host (`tools/usb-acm-test.sh`).
 
 ## First runs of the drivers, one flash each
 
-Each driver is written from the BSP's facts and has not run on the phone yet. Bring them up one at a time, each
+Each driver is written from the BSP's facts. Those seen working since (touch, the battery, vibration, USB, the
+GPU, the M3s: runs 3-7, 18-24 and 26-29) are kept here as the record of their bring-up. Bring the rest up one at a time, each
 step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 cpus=2 bootcpu=2
 <args>`). Note that `mkimage.sh` given any arguments uses those alone, in place of the configuration's (`cpus=2
 bootcpu=2`): keep those two in every run, as the column below leaves them out.
@@ -475,7 +489,6 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
 | Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, INTx, the phone's address, the station, joining) are written: `wifi_pcie=1..6`, then `brcmfmac=1..8`, one run each ([WIFI.md](WIFI.md)); not yet run |
-| A longer log | USB is written (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
+| A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
 | Storage, writing | /private/var kept between runs needs a writable partition of the port's own (the POCO's `darwin`) |
-| Buttons | GPIO keys: a driver, the pins from `gpio_keys` |
-| The M3s | the ISA question above, then a loader that numbers two clusters |
+| The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
