@@ -1,6 +1,7 @@
 # The Galaxy S9's cameras: what it takes, and the plan
 
-State: stages 1 to 3 written (`drivers/camera/hakios.exynos_camera.c`, `cam_s9=1` to `5`), none yet run on the phone.
+State: stages 1 to 3 written (`drivers/camera/hakios.exynos_camera.c`, `cam_s9=1` to `5`), and `camshot` over the USB
+console (`cam_s9=6`, below); none yet run on the phone.
 Stages 4 and 5 are a plan. Everything below comes from Samsung's BSP (android_kernel_samsung_exynos9810, lineage-24.0, e5906667; the
 device tree exynos9810-starlte_eur_open_26.dts in it), read for facts only (GPL-2.0, never copied).
 
@@ -71,7 +72,8 @@ _RESOL, _ENABLE), which proves the DMA without a sensor, as the POCO's `cam=3` u
    does for the G3D); CMU_ISPPRE's bus taken from CMU_TOP and the Q-channels of the four CSISs, the PDP's DMA and the
    SysMMU requested; CSIS1's version, its VC0 WDMA, the DMA common and the SysMMU's MMU_CTRL read. `cam_s9=4`: the
    D-PHY's isolation bypassed (PMU 0x730 bit 0) and its reset released (0x16210500 bit 2), CSIS1 reset and set up
-   (two lanes, CSI_MODE_VC_DT, VC0 RAW10 1632 x 1224, CH2 the embedded data), a 4 MB buffer below 4 GB given to all
+   (two lanes, CSI_MODE_VC_DT, VC0 RAW10 1632 x 1224, CH2 the embedded data), a 4 MB buffer below 4 GB (at 0xD8000000,
+   outside XNU's RAM: the memory table in README.md) given to all
    eight of VC0's frame pointers, the DMA common as csi_hw_s_dma_common leaves it, and the test pattern generator on
    for one frame (with the pattern on, Android does not enable the link); the frame end waited for (2 s), the WDMA
    and the pattern off, the buffer's checksum and first bytes logged. Only with the SysMMU seen off (its state after
@@ -86,7 +88,16 @@ _RESOL, _ENABLE), which proves the DMA without a sensor, as the POCO's `cam=3` u
    (1.5 s), the WDMA off, streaming off; the CSIS's error bits, frame counter and PHY state, the checksum, and the mean
    of a 64 x 64 patch in the middle read as MIPI RAW10. Risk: medium (the settle; whether the mode table needs a
    global init the BSP does not show). The header of the driver has every register.
-4. **/dev/hakios-camera.** `cam_s9=6` (the kernel's interface as `hakios.camera.c` gives it: open powers up, read
+   **Written: camshot.** `cam_s9=6` makes steps 1 to 5 at the start and then keeps the camera's thread for the USB
+   console (`usb_gadget=5`): `camshot [N]` powers the sensor up, takes one frame as step 5 does, powers everything down
+   again, debayers the frame on the processor (each 2 x 2 cell of GRBG one pixel, 816 x 612, every Nth for N > 1; the
+   black level off, a grey-world balance, the green's mean to 18 %, a gamma of 2) and sends it the way `shot` sends the
+   panel; `camshot N tp` does the same with the test pattern (steps 3 and 4). A capture that fails answers
+   "usb: camshot failed: ..." with CSIS1's interrupt sources, frame counter and PHY state and the WDMA's control,
+   status and error code. On the host: `tools/usb-shot.py --cam -o cam.png`. The frame's buffer and the picture are
+   physical memory at 0xD8000000 (8 MB), mapped once through IOKit (the WDMA's addresses are 32 bits and XNU has no
+   memory below 4 GB on this phone). `cam_s9_bayer=0-3` and `cam_s9_stride=` correct the debayer's guesses.
+4. **/dev/hakios-camera.** `cam_s9=7` (the kernel's interface as `hakios.camera.c` gives it: open powers up, read
    gives `struct hakios_camera_frame` with format 1 RAW10, `bayer`, `black` (64 in 10 bits, the usual for Samsung's sensors: to be measured), exposure
    lines, line length, gain registers; write takes EXPOSURE, SENSOR, FOCUS). Frames by the CSIS's frame-end interrupt
    and a ring of buffers (the WDMA has 8 frame pointers). `sensor` numbering follows the header: 2 the front, 1 the
@@ -117,6 +128,7 @@ phone (`/vendor/firmware/`), never into this repository.
 | C3 | `cam_s9=3` | "DPU status 0x..f", "the domain is on", "SMC 0x82000410 returned 0", "CSIS1: version 0x...", "the SysMMU: MMU_CTRL 0x0", then "the ISPPRE domain off again ... returned 0" and "status 0" |
 | C4 | `cam_s9=4` | "the buffer: 4194304 bytes at 0x...", "CSIS1 set up", "THE FRAME ENDED", "N bytes changed, the last at L (L/1224 a line)", "THE PATTERN REACHED MEMORY" |
 | C5 | `cam_s9=5` | after C4's lines: "read back: output 1632 x 1224, frame 1266 lines ...", "the sensor's frame count 0x.." (not 0xff), "frame end 1 ... 2", the CSIS's error bits 0, "THE PATCH ...: mean M" (64 or so with the lens covered, more in light), "A FRAME OF THE SENSOR'S IS IN MEMORY" |
+| C6 | `cam_s9=6 usb_gadget=5` | after C5's lines, "6: CAMSHOT READY"; then on the host `tools/usb-shot.py --cam -o cam.png`: "usb: camshot: asked of the camera", the camera's lines ("THE SENSOR ANSWERS", "frame end 1 ... 2"), "camshot: RAW10 GRBG at a stride of 2040 (or 2048)", "usb: camshot: the front camera, 816x612 RGB", "usb: camshot 1 sent", and cam.png; `--tp` the same with the test pattern |
 
 If C1 says the S2MPB02 does not answer, the flashlight's `torch=1` has the same bus: try it. If C2 says the sensor does
 not answer, run again with `cam_s9_ipclk=200` (the bus then runs at half speed if the clock is 400 MHz).
@@ -124,4 +136,5 @@ If C3 says the SMC returned anything but 0, the domain went off again and nothin
 read the answer (0xffffffff... means Carbon or EL3 does not know the call). If C4 gives no frame end, the lines "the
 others' INT_SRC" say whether the generator fed another CSIS's DMA. If C5 gives "frame end" but the patch reads 0 or
 1023 everywhere, try `cam_s9_exp=` and `cam_s9_gain=`; if no frame end and the CSIS's SOT or CRC error bits are set,
-the settle is the suspect.
+the settle is the suspect. If C6's picture has the right shapes and the wrong colours, try `cam_s9_bayer=` 0, 2 or 3;
+if it is sheared, `cam_s9_stride=` (the "bytes written" over 1224); a "camshot failed" line names the registers to read.
