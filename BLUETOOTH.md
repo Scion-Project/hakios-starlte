@@ -31,20 +31,19 @@ What the chip is told is what Linux's Broadcom drivers tell it (`btbcm.c`, `hci_
 HCI_Reset; Read Local Version; Download Minidriver (0xFC2E), 50 ms, the `.hcd` file's records one by one, 250 ms; HCI_Reset
 and Read Local Version again. The baud rate stays at 115200 (Android raises it to 4 Mbaud with 0xFC18; stage 2).
 
-## The file from the phone
+## The patch
 
-Never committed: `fw-bt/` is outside the repository's whitelist (`.gitignore`), like `fw-wifi/`.
+Broadcom's patch, one for each module maker: `bcm4361B2_murata.hcd` ("BCM4361B2 Crown 1QW ANT1") and
+`bcm4361B2_semco.hcd` ("BCM4361B2 Crown E32A ANT1"), about 106 KB each. The project carries both (`firmware/bt/`, from
+the LineageOS 24 vendor image; its README has the sums) and the phone has them in its VENDOR partition. At step 6 the
+driver takes, in order: `fw/<bt_hcd>` if `bt_hcd=` names one there (a developer's own `fw-bt/`); then, for the module,
+`fw/bcm4361B2_<module>.hcd` (`userland/build.sh DEVICE=starlte`) and the phone's own `/vendor/firmware/` and
+`/vendor/etc/bluetooth/`, read at run time (`ufs=2`, `drivers/storage/hakios.ext4.c`, as for Wi-Fi; `bt_vendor=0` leaves
+VENDOR alone).
 
-| The phone's file | What | In `fw-bt/` as |
-|---|---|---|
-| `/vendor/firmware/bcm4361B2_murata.hcd` or `bcm4361B2_semco.hcd` | Broadcom's patch for the module; about 106 KB, 440 Write_RAM records and a Launch_RAM | `bcm4361B2.hcd` |
-| `/data/.cid.info` | which module this phone has ("murata" or "semco", written by bcmdhd at first boot) | (to choose the `.hcd`) |
-
-`adb shell su -c 'ls -l /vendor/firmware/*.hcd; cat /data/.cid.info'`, then
-`adb pull /vendor/firmware/bcm4361B2_<module>.hcd fw-bt/bcm4361B2.hcd`. Which file Samsung's closed `libbt-vendor.so`
-picks is not known from source; the module name is the likely key. The patch carries its own description (Murata's
-"BCM4361B2 Crown 1QW ANT1", SEMCO's "BCM4361B2 Crown E32A ANT1"), which the driver logs. `bt_hcd=<name>` takes another
-name from `fw/`. `userland/build.sh` puts every `fw-bt/*.hcd` into the small image's `fw/`.
+Which module: `bt_module=murata` or `semco`; else what Wi-Fi read from the chip's OTP in the same run (`brcmfmac=2` and
+up: the module's ID, WIFI.md; the driver waits up to 30 s for it); else Murata's first, and the log calls it a guess.
+The patch's own description, which the driver logs, names the module it is for.
 
 ## First runs
 
@@ -58,7 +57,7 @@ each. The driver is off without `bt=`.
 | 3 | `cpus=2 bootcpu=2 bt=3` | "UBRDIV 107 UFRACVAL 8 (115207 baud from 200 MHz)", "loopback: all 16 bytes came back" |
 | 4 | `cpus=2 bootcpu=2 bt=4` | "BT_EN high: the chip powered", the expander's output now with bit 7 set and reading 1, "nothing from the chip on its own", then "the chip off" |
 | 5 | `cpus=2 bootcpu=2 bt=5` | "HCI version .. revision ...., LMP version .. subversion ...., manufacturer 000f (Broadcom)" and a local name. No answer: the log has UFSTAT and UMSTAT (CTS) |
-| 6 | `cpus=2 bootcpu=2 bt=6` (with `fw-bt/bcm4361B2.hcd` in the image) | "fw/bcm4361B2.hcd: ... 441 records ... \"BCM4361B2 Crown ...\"", "100 of 441" ... "Launch_RAM", then the version again and "before the patch a.b.c build n, after it ..." |
+| 6 | `cpus=2 bootcpu=2 bt=6 ufs=2 wifi_pcie=6 brcmfmac=2 brcmfmac_poll=1` (the module from Wi-Fi's OTP read) | "the module is semco's, as Wi-Fi read it", "the patch is the phone's /firmware/bcm4361B2_semco.hcd", "VENDOR:/firmware/bcm4361B2_semco.hcd: ... 441 records ... \"BCM4361B2 Crown ...\"", "100 of 441" ... "Launch_RAM", then the version again and "before the patch a.b.c build n, after it ..." |
 
 Each step logs what it is about to do before doing it. At the end the chip is powered off (BT_EN and BT_WAKE low)
 unless `bt_keep=1`. A run that stops at the first I2C transfer with a time-out is the bus or the expander (run 2's

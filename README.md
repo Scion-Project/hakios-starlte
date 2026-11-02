@@ -532,14 +532,17 @@ Go up one step a run: `mkimage.sh -s 60 cpus=2 bootcpu=2 wifi_pcie=1`, and so on
 
 Stage 2 (`drivers/wifi/hakios.brcmfmac.c`, `wifi_pcie=6 brcmfmac=N`, built in, off by default): Linux's brcmfmac
 (ISC) on the Linux layer the POCO's ath11k runs on, its object made by `tools/mk-brcmfmac.sh` before the kernel is
-built. 6 hands the device on; then `brcmfmac=1` reads the chip's ID through BAR0, 2 asks for the firmware, NVRAM and CLM
-(from the user's own phone, in `fw-wifi/` under brcmfmac's names: WIFI.md has the table), 3 starts the firmware, 4 sends
+built. 6 hands the device on; then `brcmfmac=1` reads the chip's ID through BAR0, 2 reads which module it is from its OTP
+and asks for the firmware, NVRAM (the module's) and CLM (`firmware/wifi/` of this repository in `fw/`, or the phone's own
+VENDOR partition read at run time with `ufs=2`: WIFI.md has the table), 3 starts the firmware, 4 sends
 it its first command (the first DMA) and registers the wiphy. 5 takes the chip's interrupt by INTx (SPI 253) instead of
 a thread that looks (`brcmfmac_poll=1` keeps the thread), 6 gives the firmware the phone's address (`fw-wifi/mac.info`,
 the phone's `/efs/wifi/.mac.info`), 7 is the station: the interface up, en0 on it, iOS's Wi-Fi settings scan through it,
 and 8 joins: an open network or WPA2 with a passphrase (the four-way handshake by the kernel's own `lx_wpa.c`, as on the
 POCO), and the network of `fw-wifi/network` at once if there is one. On the way back to the loader the driver is taken
-down and the radio unpowered (WLAN_REG_ON low). Written, not yet run.
+down and the radio unpowered (WLAN_REG_ON low). Written, not yet run. iOS's Settings reach it through the kernel's
+Apple80211 surface, as on the POCO; nothing in user space changes (WIFI.md, "iOS's side"). The first image to run is
+`wifi-a` (WIFI.md, "The plan on the phone": `wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`, stages a to c in one run).
 
 ## Speaker audio
 
@@ -676,7 +679,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 14 | `tmu=2` | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell (the big zone is the M3s', which cannot be started yet: The cores, above) |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 | 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
-| 17 | `bt=1` up to `bt=6`, one step a run (6 needs `fw-bt/bcm4361B2.hcd`) | "UART_BT's clock ... (ratio 2: 200 MHz", the expander's ports and BT_EN, "loopback: all 16 bytes came back", "the chip powered", "manufacturer 000f (Broadcom)", then the patch and the version after it ([BLUETOOTH.md](BLUETOOTH.md)) |
+| 17 | `bt=1` up to `bt=6`, one step a run (6 takes the patch from `fw/` or the phone's VENDOR; with `wifi_pcie=6 brcmfmac=2` the module is read from the chip's OTP) | "UART_BT's clock ... (ratio 2: 200 MHz", the expander's ports and BT_EN, "loopback: all 16 bytes came back", "the chip powered", "manufacturer 000f (Broadcom)", then the patch and the version after it ([BLUETOOTH.md](BLUETOOTH.md)) |
 | 18 | `usb_gadget=1` | "usb: exynos9810: PMU USB PHY ...", "CMU_TOP CLKCMU_FSYS0_USB30DRD: ... gate ..." (if SHUT, the next runs add `usb_gadget_clk=1`), "LDO9-14 CTRL: ...", "USBCON as the boot left it", "DWC3 as the boot left it: GSNPSID 5533...", DCTL's RUN_STOP |
 | 19 | `usb_gadget=2` | "2a: PMU +0x72C ... -> ...1" to "2l: COMBO_PMA_CTRL ...", none "(NOT as written)"; "USBCON after: ... (SIDDQ 0, line ...)" |
 | 20 | `usb_gadget=3` | "3: reset done in N us", "DWC3 set up: ... DCTL ... event buffer ..."; "did not finish in 500 ms" means the PHY gives the link no clock |
@@ -703,7 +706,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
-| Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, INTx, the phone's address, the station, joining) are written: `wifi_pcie=1..6`, then `brcmfmac=1..8`, one run each ([WIFI.md](WIFI.md)); not yet run |
+| Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, the module from OTP, the files from `fw/` or VENDOR, INTx, the phone's address, the station, joining) are written: image `wifi-a` (`wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`) first, then `brcmfmac=8` ([WIFI.md](WIFI.md), "The plan on the phone"); not yet run |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
 | Storage, writing | /private/var kept in USERDATA is written (above); first runs, then an image with ReportCrash allowed for crash reports |
 | The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
