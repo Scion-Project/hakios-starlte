@@ -329,6 +329,40 @@ panfrost and not panvk, and the runs after `mali=9` (mali_test, the window serve
 Programs' buffers get GPU addresses between 32 MB and 4 GB, given back when freed, code kept off 16 MB lines, as Linux
 panfrost gives them and Mesa expects.
 
+## The display: tearing, and the scaling in hardware
+
+How a frame reaches the panel today. CoreAnimation draws the iPhone's 1125 x 2436 into an IOSurface and hands it to
+`MiniIOMobileFramebuffer.cpp` (SwapEnd). Its presenter thread waits for the GPU, waits for its own 60 Hz beat (a
+timer: `fb_beat`), then scales the surface on the processor (`fb_threads` of them; nearest neighbour while frames
+come, bilinear once they stop: `fb_filter=2`) straight into the boot framebuffer at 0xCC000000. The DECON (DECON0,
+0x16030000) runs as S-Boot left it: MIPI command mode, each frame started by the panel's TE, one window on one DMA
+channel whose IDMA reads that same buffer. Nothing ties the presenter to the DECON's frame: the processor writes the
+next frame while the DECON is sending the last one to the panel, and the panel gets half of each (the tearing, and most likely
+text that is gone for a refresh while its rows are being rewritten). There is no vsync interrupt: the driver's
+"vsync" is its own timer.
+
+`drivers/gpu/hakios.exynos_dpu.c` (off by default; written, not yet seen) gives the presenter the DECON:
+
+- `fb_flip=1`: three buffers of the panel's size (the boot one and two more, contiguous, below 4 GB); a frame is drawn
+  into one that is neither shown nor waiting, then its address goes to the channel's IDMA and a shadow update is asked
+  for, which the DECON takes at the start of its next frame. The next flip waits for that. No buffer is written while
+  it is read; frames reach the panel at most once a refresh. The scaling stays on the processor.
+- `fb_dpp=1`: the window is moved to the channel VGF0, one of the two whose DPP has a scaler; it reads three buffers of
+  1125 x 2436 and scales them to 1440 x 2960 (Catmull-Rom, 8 taps across and 4 down). The processor only copies the
+  frame (a row-by-row memcpy, about a third of the bytes of a scaled frame and none of the arithmetic). Flips as above.
+- Either goes back to drawing into the boot framebuffer, on the boot loader's channel, when the DECON is not as
+  expected (one window, its IDMA reading 0xCC000000 at 1440 x 2960, command mode), when VGF0 reports a configuration
+  error after the switch, or when a flip is not taken within 100 ms.
+- `fps_log=1`: a line a second, "fps: N presented, N drawn, N flips, N lost, N held; drawing N us a frame ...; N
+  refreshes; ...", the refreshes being the DECON's FRAME_COUNT. With `fps_log=1` alone the DECON is only read
+  ("exynos_dpu: DECON0: ...", the window, the channel's registers), which is the first thing to see.
+
+| Run | Arguments (with the six-core ones) | What to look for |
+|---|---|---|
+| 31 | `fps_log=1` | "exynos_dpu: DECON0: control ... (command mode, running), trigger ... (HW on ...)", "window N ... on channel N (G0)", the channel's base 0xcc000000; "fps:" lines while the screen moves, and how many refreshes a second |
+| 32 | `fb_flip=1 fps_log=1` | "exynos_dpu: flips on G0 between 3 buffers", "fps: ... mode flip" with flips close to drawn; no tearing; no "scan-out given up" |
+| 33 | `fb_dpp=1 fps_log=1` | "exynos_dpu: VGF0 scaler: 1125x2436 to 1440x2960", "VGF0 after 3 refreshes: ... errors 0", "VGF0 scales"; then "fps: ... dpp: VGF0 scales" with drawing a few ms at most |
+
 ## Vibration and the flashlight
 
 `max77705_haptic=1` gives iOS the vibration motor: the MAX77705's haptic block (the same chip as the charger: two of
