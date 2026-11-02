@@ -1,0 +1,8 @@
+# build output and editor/merge leftovers; xnu-starlte.img is written in the kernel tree, never here
+*.img
+!prebuilt/*.img
+*.orig
+*.rej
+*~
+.DS_Store
+__pycache__/
