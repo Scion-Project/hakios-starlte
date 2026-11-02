@@ -343,7 +343,7 @@ text that is gone for a refresh while its rows are being rewritten). There is no
 
 `drivers/gpu/hakios.exynos_dpu.c` (off by default; written, not yet seen) gives the presenter the DECON:
 
-- `fb_flip=1`: three buffers of the panel's size (the boot one and two more, contiguous, below 4 GB); a frame is drawn
+- `fb_flip=1`: three buffers of the panel's size (the boot one and two more, below 4 GB: see the first run below); a frame is drawn
   into one that is neither shown nor waiting, then its address goes to the channel's IDMA and a shadow update is asked
   for, which the DECON takes at the start of its next frame. The next flip waits for that. No buffer is written while
   it is read; frames reach the panel at most once a refresh. The scaling stays on the processor.
@@ -362,6 +362,30 @@ text that is gone for a refresh while its rows are being rewritten). There is no
 | 31 | `fps_log=1` | "exynos_dpu: DECON0: control ... (command mode, running), trigger ... (HW on ...)", "window N ... on channel N (G0)", the channel's base 0xcc000000; "fps:" lines while the screen moves, and how many refreshes a second |
 | 32 | `fb_flip=1 fps_log=1` | "exynos_dpu: flips on G0 between 3 buffers", "fps: ... mode flip" with flips close to drawn; no tearing; no "scan-out given up" |
 | 33 | `fb_dpp=1 fps_log=1` | "exynos_dpu: VGF0 scaler: 1125x2436 to 1440x2960", "VGF0 after 3 refreshes: ... errors 0", "VGF0 scales"; then "fps: ... dpp: VGF0 scales" with drawing a few ms at most |
+
+First run of 33 (`60fps-a`, 2 November): the probe as expected ("windows 100000 (1 on)", "window 5 ... on channel 5
+(G0)", G0 reading 0xcc000000 at 1440 x 2960; its IDMA ENABLE reads 0 while the DPP's reads 1, which nothing checks), and
+then nothing of fb_dpp: every "fps:" line said "boot framebuffer". The buffers were never had: the presenter asked IOKit
+for memory in one piece below 4 GB, and this kernel has none there (the loader gives XNU the bank from 0x880000000 on;
+the kernel itself is at 0x883416000), and it said so only with IOLog, which does not reach the loader's log. Now the DPU
+driver puts the buffers in the device tree's free gap of the lower bank, from 0xD4000000 (above the moved payload and
+panic log, 0xD0000000-0xD3FFFFFF) to secure_camera at 0xE1900000 (no reserved-memory node; never 0xF0000000 and above,
+the modem's and ABOX's), mapped write-combined (fb_dpp's three buffers take 33.8 MB, fb_flip's two 34.2 MB); and
+every step says what it decided in the loader's log. What a run says now, in order:
+
+- "MiniIOMobileFramebuffer: scan-out: fb_dpp=1 fb_flip=0 fps_log=1; the boot framebuffer at 0xcc000000, 1440x2960 ..."
+- the probe's lines, then "exynos_dpu: probe: as expected (window 5 on G0 ...)"
+- "exynos_dpu: memory: 3 buffers of 11239424 bytes at 0xd4000000 to 0xd6040000 (the device tree's gap below
+  secure_camera ...)"
+- "MiniIOMobileFramebuffer: fb_dpp: 3 buffers of 1125x2436, 4608 bytes a row, at 0xd4000000 0xd4ac0000 0xd5580000 (the DPU
+  driver's, below 4 GB)"
+- at the first frame of the home screen: "scan-out: the first frame drawn into buffer 0 ...", "exynos_dpu: attach:
+  VGF0's scaler (fb_dpp) asked for ...", the VGF0 dumps and "VGF0 after N refreshes: ... errors ...", then
+  "fb_dpp: taken: ..." or "attach: VGF0's scaler not taken" and "the scan-out given up (...)"
+- "fps: ... dpp: VGF0 scales" (or "flip" for run 32).
+
+That run's frame rate (10 presented a second, against more on runs without fb_dpp) is what iOS sent: no swap was held
+or lost, and drawing took 10-15 ms of every 100. Nothing of fb_dpp ran in it.
 
 ## Vibration and the flashlight
 
