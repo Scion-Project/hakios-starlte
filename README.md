@@ -105,6 +105,8 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xAF800000 + 32 MB, 0xB8000000 + 2 MB, 0xC0000000 + 512 KB | `rkp_region`, `tima_region` (disabled), `seclog_mem` | DT |
 | 0xCC000000 + 0x1043000 | the panel's buffer (GOP), reserved | UEFI, DT `s3cfb.bootloaderfb` |
 | **0xD0000000 + 64 MB** | **the payload, moved here at the start** (a step of 64 MB up if that is taken); its last MB the panic log (`pram`) | L `payload_home` |
+| 0xD4000000 to 0xD71E0000 at the most | the display's scan-out buffers (`fb_flip`: two of the panel's size, to 0xD60A0000; `fb_dpp`: three of the display's) | `hakios.exynos_dpu.c` |
+| 0xD8000000 + 8 MB | the front camera's frame and camshot's picture (`cam_s9=4` and up): the WDMA's addresses are 32 bits, so it is here, outside XNU's RAM, mapped through IOKit | `hakios.exynos_camera.c` |
 | 0xE1900000 + 30 MB | `secure_camera`, reserved | DT, UEFI |
 | 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
 | **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |
@@ -512,8 +514,10 @@ the S5K3H1: `cam_s9=1` looks (the S2MPB02's camera LDOs, CIS_CLK1, the pins), `c
 Android's order (three LDOs of the S2MPB02 at Android's voltages, reset, MCLK at 26 MHz), reads its model ID over I2C
 (0x35 on USI08_I2C of PERIC1) and powers it down. `cam_s9=3` switches the ISPPRE power domain on (with the DTZPC
 restore SMC, as the GPU's) and reads CSIS1 and the SysMMU; `cam_s9=4` has the CSIS's own test pattern generator write
-one frame through CSIS1's VC0 DMA into a buffer below 4 GB and logs its checksum; `cam_s9=5` streams the sensor at
-1632 x 1224 RAW10 on two lanes and keeps one frame, with the mean of a patch to tell a picture from black. Written, not
+one frame through CSIS1's VC0 DMA into a buffer below 4 GB (0xD8000000) and logs its checksum; `cam_s9=5` streams the sensor at
+1632 x 1224 RAW10 on two lanes and keeps one frame, with the mean of a patch to tell a picture from black; `cam_s9=6`
+does that and then answers the USB console's `camshot [N]` (`tools/usb-shot.py --cam -o cam.png`): one frame each time,
+debayered on the processor and sent as a picture, or the CSIS's and the WDMA's registers when it fails. Written, not
 yet run. [CAMERA.md](CAMERA.md) has the hardware of both cameras, the steps' expected lines and the rest of the plan:
 the `/dev/hakios-camera` that iOS's capture stack already reads on the POCO.
 
@@ -663,6 +667,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 8 | `torch=1`, then `torch=2 torch_secs=2` | "ID ...; FLED_CTRL1 ..., CTRL2 ..." (reads only), then lit for 2 s at 60 mA |
 | 8a | `cam_s9=1`, then `cam_s9=2` | "S2MPB02 ID ...", the LDOs "off"; then "THE SENSOR ANSWERS: model ID 0x...." and "powered down ... off as found" ([CAMERA.md](CAMERA.md)) |
 | 8b | `cam_s9=3`, then `4`, then `5`, one a run | "SMC 0x82000410 returned 0" and "MMU_CTRL 0x0"; then "THE PATTERN REACHED MEMORY"; then "frame end 1" and "THE PATCH ...: mean ..." (CAMERA.md's runs C3 to C5) |
+| 8c | `cam_s9=6 usb_gadget=5`, then `tools/usb-shot.py --cam -o cam.png` | "6: CAMSHOT READY"; then "usb: camshot 1 sent" and a picture from the front camera, or "usb: camshot failed: ..." with the CSIS's and the WDMA's registers (CAMERA.md's run C6) |
 | 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
 | 10 | `abox=1` up to `abox=6`, one step a run | "the AUD domain is on", "IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648xxx Hz", "UAIF1_CTRL1 ... reads 0x984f000", the sample banks ([AUDIO.md](AUDIO.md)) |
 | 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
