@@ -121,6 +121,15 @@ which features the processor has (`hw.optional.arm.FEAT_*`) and then uses them. 
 **a kernel with the M3s boots on one: `bootcpu=4 cpus=8`.** It then reports no more than every core can do, runs on
 the big cores first, and leaves core 0 to the loader, which is also what the storage needs (below).
 
+Seen on the phone (2 November 2026): **six cores run iOS, booted on an A55: `cpus=6 bootcpu=2 m3_prep=3 pan=0`** -- A55s 2
+and 3 and the four M3s. Two things were needed beyond `m3_prep=3`'s writes: `pan=0` (patch 1509: PAN is ARMv8.1, and
+every PAN instruction is UNDEFINED on an M3, starting with `arm_init_cpu()`'s first), and patch 1510's `isa_floor`, on by itself with
+`m3_prep>=3`: user space is told only the ARMv8.0 set every core has (ID_AA64ISAR0 lowered to AES, PMULL, SHA1, SHA2 and
+CRC32; nothing of ISAR1, MMFR2 or PFR1; PFR0's FP and AdvSIMD without half precision). Without it launchd, told the A55's
+8.2 set, was killed with SIGILL once it ran on an M3. `m3_diag=1`, `m3_flush=1` and `m3_ids=1` (patch 1509) are the
+diagnostics used on the way (patch 1509 also maps esslog's buffer uncached, so that a hard hang keeps its last lines);
+none is needed for the boot. Booting on an M3 (`bootcpu=4`) has not been tried.
+
 ## Build
 
 ```sh
