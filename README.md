@@ -484,6 +484,24 @@ reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_s
 Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
 it the way Android does, but never arms its hardware trip. Written, not yet run.
 
+## The clock
+
+The time of day was the moment the image was made: `mkimage.sh` puts `epoch=$(date +%s)` on the command line and the
+kernel's calendar starts there on every boot (iOS showed 2:11 at 08:49 UTC). The phone has a real-time clock that keeps
+running while it is off, the RTC block of the S2MPS18 PMIC, and `drivers/power/hakios.s2mps18_rtc.c` (`rtc_pmic=1`, built
+in, off by default) reads it once, when the kernel first asks for the time of day. It only reads: the PMIC is on SPEEDY,
+which the APM owns, and its registers are asked for through ACPM (channel 2, block 2, the path the GPU and touch drivers
+take), CTRL to YEAR (0x00-0x0B), never written. Binary, 24-hour, the year since 2000, Linux's own test for a reset clock
+(CTRL bit 1 and CAPSEL[7:4] = 0xF), from Samsung's `rtc-s2mps18.c` and `rtc-s2mp.h`. What it reads is what S-Boot last
+latched (S-Boot reads the clock on every boot; latching it again would be a write), so the kernel's uptime is added when
+it says the timer started with this boot. The calendar starts at the clock when it is valid, its year 2024-2099 and not
+behind `epoch=`; otherwise at `epoch=`, as before. Every register and the decision go to the loader log (`rtc: ...`).
+
+What to expect: on every Android boot logged so far, S-Boot and Linux read 2018-01-01 (`runs/auto-210855/last_kmsg`): the
+clock was reset and nothing set it again. Then the log says "rtc: not used (the year is not 2024-2099 ...)" and `epoch=`
+stays. Setting the clock (from Android, which sets it when it has network time, or from iOS's time through a write here)
+is the step after this one.
+
 ## USB: the whole log and a console over the cable
 
 pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
@@ -560,7 +578,8 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 27 | `m3_prep=2` | "m3: 2: CPU_QCH_CLUSTER1_NONCPU_SYS_PWR_REG (PMU +0x1088): c7...... -> 8d......" and five OPTION lines, "the six CLUSTER1 fields hold Samsung's values", the state "after the writes"; then the boot as run 1 (nothing else changes) |
 | 28 | `m3_prep=3 cpus=3 bootcpu=2` (in place of `cpus=2`) | "m3: 3: CPU_ON for cpu 2 (MPIDR 0x100) next", "psci: cpu 2: the firmware answered 0 (success)", "stage 3", "3 of 3 processors are running". A hang after "CPU_ON with entry" is the old one: then the fields were not the cause (the watchdog restarts into TWRP) |
 | 29 | `m3_prep=3 cpus=6 bootcpu=2` | the four M3s, each "answered 0" and "stage 3", "6 of 6 processors are running". (`bootcpu=4` stays out: the loader starts the boot core itself, before this kernel can write the fields) |
-| 30 | run 29's arguments and `cohtest=1` | 30 s after start-up: a "cohtest: cpu N ... MPIDR ... CTR ..." line for each processor, "cohtest: A55 cpu N (MPIDR 0x2) and M3 cpu N (MPIDR 0x100)", steps 0 to 7c each "0 of 128 lines wrong: ok" (step 1: "100000 of 100000 rounds, 0 stale ... 0 stuck"), then "cohtest: verdict: COHERENT" or "NOT COHERENT: n of 9 checks failed" (the head of hakios.exynos_m3.c says how to read which). `cohtest=3` runs it three times, 30 s apart, while the screen draws |
+| 30 | run 29's arguments and `cohtest=1` | 30 s after start-up: a "cohtest: cpu N ...: A55" (or "M3") line for each processor with its MPIDR and MIDR, "cohtest: 2 A55s and 4 M3s: every pair, both ways", the first pair's steps 0 to 7c each "0 of 128 lines wrong: ok" (step 1: "100000 of 100000 rounds, 0 stale ... 0 stuck"), a line "A55 0 -> M3 2: 9 of 9 checks passed: ok" for each of the 16 directions, then "cohtest: summary: PASS: COHERENT" or "summary: FAIL: NOT COHERENT: n of 16 directions failed" (the head of hakios.exynos_m3.c says how to read which). `cohtest=3` runs it three times, 30 s apart, while the screen draws. (Its first version took MPIDR's Aff1 for the cluster and said "no A55" with six cores: the A55s number themselves in Aff1) |
+| 31 | `rtc_pmic=1` | "rtc: CTRL 0x02 ... YEAR 0x..", "rtc: the clock says YYYY-MM-DD hh:mm:ss ...", then "rtc: using the clock: ..." or "rtc: not used (why)" (The clock, above) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
