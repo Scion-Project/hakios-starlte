@@ -201,9 +201,14 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
    read after a run and where Android is put back. From TWRP: `adb push xnu-starlte.img /sdcard/`, then Install, Install
    Image, Boot (or `heimdall flash --BOOT xnu-starlte.img` from Download mode).
 4. Power on: HakiOS starts. A run restarts the phone into recovery when it ends (the loader sets the reset reason
-   S-Boot reads, PMU INFORM3 = 0x12345674, as Android's `reboot recovery` does; `recovery=0` turns it off), so TWRP
-   comes up with the log still in RAM. If the phone hangs instead, hold Vol Down + Power until it restarts, then at
-   once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
+   S-Boot reads, PMU INFORM2 = 0x12345678 and INFORM3 = 0x12345674, as Android's `reboot recovery` does, right before
+   it restarts the phone with the PMU's software reset, SWRESET, as Samsung's kernel does; `recovery=0` turns it off),
+   so TWRP comes up with the log still in RAM. S-Boot's log in TWRP (`/proc/last_kmsg`) then reads `SW_RST
+   (0x20000000)` and `INF3: 12345674`. The cluster watchdog's reset (`WDT_RST2 (0x800000)`) is different: S-Boot finds
+   INFORM2/3 cleared after it and starts BOOT, the run again. That is what a hang of the whole phone ends in, and what
+   every run ended in before the loader restarted with SWRESET itself (its echo of the kernel's log on the screen
+   outlasted the watchdog). If the phone hangs or comes back into HakiOS, hold Vol Down + Power until it restarts,
+   then at once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
 
 The default command line (`cpus=2 bootcpu=2 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 2 and 3 and leaves
 core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
