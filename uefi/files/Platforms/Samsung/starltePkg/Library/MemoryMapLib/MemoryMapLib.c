@@ -14,9 +14,10 @@ gMemoryDescriptor[] = {
   {"Display Reserved",   0xCC000000, 0x01043000, AddMem, MEM_RES, SYS_MEM_CAP, Reserv, WRITE_THROUGH},
   {"Secure Camera",      0xE1900000, 0x01E00000, AddMem, SYS_MEM, SYS_MEM_CAP, Reserv, WRITE_BACK},
 
-  // HakiOS: where the boot shim copies the "XNUP" payload (the kernel, the root image, the command line) and the loader finds
-  // it. It is the modem's region in Samsung's device tree (modem_if, 0xF0000000 + 0x9200000), unused here: Android's cbd loads
-  // the modem's image there, the boot loader does not, and no modem is started under HakiOS.
+  // HakiOS: where the boot shim copies the "XNUP" payload (the kernel, the root image, the command line) and the boot manager
+  // finds loader.efi. It is the start of the modem's region in Samsung's device tree (modem_if, 0xF0000000 + 0x9200000): only a
+  // landing place. The loader moves the payload out at once (xnuloader/loader.c, payload_move) and keeps the CP's and ABOX's
+  // memory, 0xF0000000-0xFD9FFFFF, from UEFI's allocator and from XNU (README.md, Memory layout).
   {"XNU Payload",        0xF0000000, 0x04000000, AddMem, SYS_MEM, SYS_MEM_CAP, Reserv, WRITE_BACK},
   // HakiOS: Samsung's pstore (exynos-snapshot's log_pstore), where the loader keeps its log across a restart for Android or
   // TWRP to read back (xnuloader/loader.c, write_ram_log): UEFI must not put anything of its own there.
