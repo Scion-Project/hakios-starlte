@@ -426,6 +426,32 @@ reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_s
 Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
 it the way Android does, but never arms its hardware trip. Written, not yet run.
 
+## CPU clocks
+
+The clusters' rates go through the APM's ACPM firmware (DVFS domain 2 is the A55s, cpucl0; 3 the M3s, cpucl1). A request
+names a rate, never a voltage: the APM keeps each level's voltage (the ASV's, set at boot) and applies it with the rate,
+as it does for Samsung's kernel, which only reads that table (`cal-if/fvmap.c`). Two ways to use it, both off by default:
+fixed rates (`cpufreq_lit=`, `cpufreq_big=`, `drivers/core/hakios.exynos_acpm.c`), or `cpufreq_gov=1`,
+`drivers/power/hakios.exynos_cpufreq.c`, which moves both with the load and the heat, and then the fixed ones are not used.
+
+What Samsung's kernel allows on this phone (its device tree and the phone's own, `cpufreq`, `hotplug_governor`):
+
+| | levels (kHz) | min | max |
+|---|---|---|---|
+| cpucl0 (A55) | 1950000 1794000 1690000 1456000 1248000 1053000 949000 832000 715000 598000 455000 | 455000 | 1950000 (Samsung's tree; none in the phone's) |
+| cpucl1 (M3) | 2886000 2860000 2704000 2652000 2496000 2314000 2106000 2002000 1924000 1794000 1690000 1586000 1469000 1261000 1170000 1066000 962000 858000 741000 650000 598000 | 650000 | 2314000 in Samsung's tree (policy-max 1794000), 1794000 in the phone's; by M3s online: 1 or 2, 2314000; 3 or 4, 1794000 |
+
+So with all four M3s online Android never runs them above 1.794 GHz (`cpufreq_big=2106000`, the fixed rate of the six-core
+runs, is above that), and never above 2.314 GHz at all; 2704000, the S9's advertised top, is a level of the table that
+no limit lets through. The governor's ceilings: the M3s at the online count's limit and by default 1794000 at most
+(`cpufreq_gov_big_max=` up to that limit), the A55s 1794000 (`cpufreq_gov_lit_max=` up to 1950000); floors 650000 and
+1053000 (core 0, the loader's UFS service, is an A55 the scheduler cannot see). Every `cpufreq_gov_ms` (40) the busiest
+core of each cluster sets its rate (75% busy wanted; up at once, down after three windows). With temperatures from
+`tmu=2` or more, a cluster at its zone's control point (83 C BIG, 76 C LITTLE, Samsung's) loses a level of its ceiling a
+second, gets it back 5 degrees under, and goes to its lowest level at 96 (BIG's hotplug_out); without them the M3s stay
+at 1794000 or under. Once a second a line "cpufreq_gov: N s: lit ... MHz load ...% ... | big ... | temp big ... lit ... C"
+goes to the loader's log. Written, not yet run.
+
 ## USB: the whole log and a console over the cable
 
 pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
@@ -503,6 +529,7 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 28 | `m3_prep=3 cpus=3 bootcpu=2` (in place of `cpus=2`) | "m3: 3: CPU_ON for cpu 2 (MPIDR 0x100) next", "psci: cpu 2: the firmware answered 0 (success)", "stage 3", "3 of 3 processors are running". A hang after "CPU_ON with entry" is the old one: then the fields were not the cause (the watchdog restarts into TWRP) |
 | 29 | `m3_prep=3 cpus=6 bootcpu=2` | the four M3s, each "answered 0" and "stage 3", "6 of 6 processors are running". (`bootcpu=4` stays out: the loader starts the boot core itself, before this kernel can write the fields) |
 | 30 | run 29's arguments and `cohtest=1` | 30 s after start-up: a "cohtest: cpu N ... MPIDR ... CTR ..." line for each processor, "cohtest: A55 cpu N (MPIDR 0x2) and M3 cpu N (MPIDR 0x100)", steps 0 to 7c each "0 of 128 lines wrong: ok" (step 1: "100000 of 100000 rounds, 0 stale ... 0 stuck"), then "cohtest: verdict: COHERENT" or "NOT COHERENT: n of 9 checks failed" (the head of hakios.exynos_m3.c says how to read which). `cohtest=3` runs it three times, 30 s apart, while the screen draws |
+| 31 | run 29's arguments and `tmu=3 cpufreq_gov=1` | "acpm: fvmap: plugin N \"...\"" and "cpufreq_gov: big: the APM's table (DVFS 3), kHz/uV: ..." (or "the device tree's 21 levels"), "cpufreq_gov: big (DVFS 3): 650000 to 1794000 kHz, now N kHz", then a "cpufreq_gov: N s: ..." line a second, the rates moving with the load and never above the "max" they show (CPU clocks, above) |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
