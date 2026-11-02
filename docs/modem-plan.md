@@ -55,7 +55,7 @@ Sources, read for facts only. No code from them goes into our repositories:
 ### 1.2 Device tree facts (DTS)
 
 - **Reserved memory** (`DTS:29-32`): `modem_if { compatible = "exynos,modem_if"; reg = <0 0xF0000000 0x9200000>; }`
-  covers 146 MB at **0xF0000000**. `cp_ram_logging` is at 0xF91F_0000 (32 MB, `DTS:34-37`). `shm_ipc.c:461-471`
+  covers 146 MB at **0xF0000000**. `cp_ram_logging` is at 0xF920_0000 (32 MB, `DTS:34-37`; corrected in section 8). `shm_ipc.c:461-471`
   takes the region with `RESERVEDMEM_OF_DECLARE(modem_if, ...)`.
 - **shmem node** (`DTS:12616-12625`): `cp_size` 0x7900000 (121 MB, CP code and data), `vss_size` 7 MB (the
   voice DSP), `ipc_offset` 0x8000000 with `ipc_size` 5 MB, and `zmb_offset` 0x8500000 with `zmb_size` 11 MB.
@@ -132,7 +132,8 @@ CP_CTRL_NS are **secure registers**, written through SMC 0x82000700 READ_CTRL/WR
 0x424F4F54, DUMP 0x44554D50, CRASH 0xDEADDEAD.
 
 **What cbd does that the kernel does not:** it reads the TOC and the partitions, reads `nv_data.bin` (and
-**writes and repairs** it, with its `.md5` and backup, which is the EFS danger), runs the order of ioctls,
+**writes and repairs** it, with its `.md5` and backup, which is the EFS danger; section 8 shows that on
+LineageOS 24 SELinux keeps cbd read-only and rild's RFS server does those writes), runs the order of ioctls,
 does the bootloader handshake, restarts the CP after a crash and collects dumps. Everything else is
 kernel-side. On HakiOS **all of cbd moves into the kernel driver**, because the goal forbids user-space changes,
 and the kernel does none of cbd's NV writing.
@@ -399,7 +400,7 @@ Done when the SIM status, the masked IMSI and RSSI show up and the RFS write log
 in RAM only.
 
 **Effort:** 3-4 weeks. **Risk:** medium, because the message dialect differs from lsi's. **Needed:** one
-Android capture of `umts_ipc0`/`umts_rfs0` traffic (for example with the GPL kernel's `modem_pktlog`, or by
+Android capture of `umts_ipc0`/`umts_rfs0` traffic (the GPL kernel's `modem_pktlog` is not built in the LineageOS 24 kernel, section 8.1, so by
 interposing on rild), and a SIM card.
 
 ### M1.5: the CommCenter probe (parallel to M2, decides the stock path)
@@ -478,3 +479,216 @@ After that, M0 in `drivers/modem/hakios.shannon.c` behind `CONFIG_HAKIOS_SHANNON
   medium-risk rather than low.
 - **seemoo-lab BaseTrace** (GPL-3.0) and **ARIstoteles**: the public description of the iPhone side (QMI over
   PCIe for Qualcomm iPhones, Apple's private QMI services). Read for facts only.
+
+## 8. What the LineageOS 24 build shows
+
+Studied offline on 2026-11-02, with no phone: `lineage-24.0-20261025-unofficial-starlte.zip`
+(1,148,815,564 bytes, sha256 `fb2c1fd4…ee82c20d`, `samsung/lineage_starlte/starlte:17/CP2A.260605.016`). We read
+`boot.img`, the ramdisk and the whole vendor image. `system.new.dat.br` was not opened: nothing modem-related lives
+there on this build (cbd, rild, libsec-ril, the RIL configs and all the radio init scripts are on vendor). No vendor
+or firmware file was copied into this repository. Only facts are recorded here. Paths are inside the build.
+
+### 8.1 boot.img: the kernel is exactly our GPL tree
+
+- `boot.img` is an Android v0 header with Samsung's DT-size field: kernel 38,334,560 bytes, gzip ramdisk
+  1,607,625 bytes, a 305,152-byte `DTBH` blob. The kernel banner is
+  `Linux version 4.9.337-ies-20323-ge5906667068e (krazey@meme) … clang 22.0.2 … Sun Oct 25 13:30:13 CET 2026`.
+  **`ge5906667068e` is commit `e590666`, the GPL revision this plan cites.** So every GPL file and line reference
+  in sections 1-2 describes the kernel that actually runs this build.
+- The config is embedded (`IKCFG_ST`). The modem part: `CONFIG_MCU_IPC=y`, `CONFIG_SHM_IPC=y`,
+  `CONFIG_SEC_SIPC_MODEM_IF=y`, `CONFIG_SEC_MODEM_SS310AP=y`, `CONFIG_UMTS_MODEM_SS310AP=y`,
+  `CONFIG_LINK_DEVICE_SHMEM=y`, `CONFIG_LINK_DEVICE_NAPI=y`, `CONFIG_CP_SECURE_BOOT=y`, `CONFIG_CP_ZEROCOPY=y`,
+  `CONFIG_CP_RAM_LOGGING=y`, `CONFIG_CP_PMUCAL=y`, `CONFIG_PMUCAL=y`, `CONFIG_MODEM_IF_QOS=y`,
+  `CONFIG_MODEM_IF_NET_GRO=y`, `CONFIG_KLAT=y`. Not set: `CONFIG_LINK_DEVICE_MEMORY`,
+  `CONFIG_LINK_DEVICE_WITH_SBD_ARCH`, `CONFIG_CP_SMAPPER`, `CONFIG_LINK_POWER_MANAGEMENT`,
+  **`CONFIG_DEBUG_PKTLOG`**, `CONFIG_UH`, `CONFIG_RKP_CFP_JOPP`.
+  - `LINK_DEVICE_WITH_SBD_ARCH` being off does **not** turn SBD off. It only guards code in the
+    `link_device_memory_*` files, which are not built. `link_device_memory_sbd.o` is always linked with
+    `LINK_DEVICE_SHMEM` (`modem_v1/Makefile`), and SBD is chosen at run time from `mif,link_attrs` bit SBD_IPC
+    (`link_device_shmem.c:3551-3553`). Section 2's SBD-ring transport stands.
+  - `CP_ZEROCOPY=y` means the downlink data path uses the ZMB region (`zmb_offset`/`zmb_size`,
+    `link_device_shmem.c:3276-3354, 3723`). Our rmnet path has to fill and recycle ZMB buffers, not only the
+    SBD rings.
+  - `DEBUG_PKTLOG` is off, so the `modem_pktlog` capture that M1 suggests is **not available** on this kernel. An
+    IPC/RFS capture must interpose on rild (or use a kernel built with it).
+- The `DTBH` blob (version 2) holds **one** DTB, chip 0x2652, hw_rev 0x1A-0xFF, at offset 0x800, size 0x4993C:
+  `model = "Samsung Star rev26 board based on EXYNOS9810"`. It is the board DT itself, not just a SoC DT. Its
+  modem nodes are the same as the GPL DTS:
+
+| Node | What the DTB says |
+|---|---|
+| `reserved-memory/modem_if` | `compatible "exynos,modem_if"`, `reg <0 0xF0000000 0x9200000>` (146 MB, ends at 0xF91FFFFF). **No `no-map`**: Linux keeps it in its linear map. |
+| `reserved-memory/cp_ram_logging` | `reg <0 0xF9200000 0x2000000>` (32 MB, to 0xFB1FFFFF) |
+| `reserved-memory/abox_rmem` | `reg <0 0xFB200000 0x2800000>` (40 MB, ABOX/calliope) right after it |
+| `shmem@F6E00000` | `compatible "samsung,exynos-shm_ipc"`, `cp_size 0x7900000`, `vss_size 0x700000`, `ipc_offset 0x8000000`, `ipc_size 0x500000`, `zmb_offset 0x8500000`, `zmb_size 0xB00000`. **No `reg`**: the unit address `F6E00000` is only a name. The base comes from `modem_if`. |
+| `mcu_ipc@14170000` | `samsung,exynos-shd-ipc-mailbox`, `reg <0 0x14170000 0x180>`, `mcu,name "mcu_ipc_cp"`, `mcu,id 0`, SPI 0x45 (69), `irq_affinity_mask 3` |
+| `mif_pdata` | `sec_modem,modem_pdata`, `mif,name "ss360ap"`, `modem_type 0xA`, `ipc_version 0x32` (50), `link_types 0x200`, `link_name "shmem"`, `link_attrs 0x7C9`, `num_iodevs 0x15`, `buff_offset 0x500000`, `buff_size 0x900000`, SPI 0x4A (74) and 0x1B8 (440), 8 GPIOs (SIM detect lines) |
+| mailbox indices | `mbx_ap2cp_msg 0`, `mbx_cp2ap_msg 1`, `mbx_ap2cp_united_status 2`, `mbx_cp2ap_united_status 3`, `mbx_ap2cp_mif_value 4`, `mbx_cp2ap_dvfsreq_cpu/mif/int 5/6/7`, `mbx_ap2cp_kerneltime 9` |
+| interrupt bits | ap2cp: msg 0, wakeup 1, status 2, active 3, smapper 4. cp2ap: msg 0, status 2, active 3, smapper 4, perf_req cpu/mif/int 5/6/7, wakelock 8, ratmode 9 |
+| status fields | `sbi_cp_status` mask 0xF pos 1, `sbi_lte_active` pos 5, `sbi_cp_wakelock` pos 6, `sbi_cp_evs_mode` pos 7, `sbi_cp_rat_mode` mask 0x3F pos 26, `sbi_ap_status` mask 0xF pos 1, `sbi_pda_active` pos 5, `sbi_ap2cp_wakelock` pos 0, `sbi_crash_type` mask 0xF pos 23, `sbi_device_type` mask 0x1F pos 18, `sbi_ds_det` mask 3 pos 14, `sbi_sys_rev` mask 0xFF pos 6, kerneltime sec mask 0xFFF pos 20 / usec mask 0xFFFFF pos 0 |
+| `exynos-pm` | `cp_call_mode_idx 0xA`, `cp_call_psci_idx 0x85`: a separate low-power mode for "AP asleep, CP in a call". The wakeup IRQ list includes 69, 74 and 440. |
+
+  The 21 iodevs and their channel IDs match section 1.2's table exactly (`umts_ipc0` 0xEB, `umts_rfs0` 0xF5,
+  `umts_boot0` 0xD7, `umts_ramdump0` 0xE1, `rmnet0..7` 0xA-0x11 with `io_type 1`, two `multipdp` with
+  format 3, …). `umts_ipc0`/`umts_ipc1` carry `iod,app "RIL"`. There is no SMC ID, PMU or CP clock node in
+  the DT: the SMC numbers and the PMU sequences exist only in the kernel code (sections 1.4 and 1.5).
+- The ramdisk holds only `init` and `fstab.samsungexynos9810`. Nothing modem-related.
+
+### 8.2 Vendor: how cbd is started, and what it does
+
+- `vendor/etc/init/init.baseband.rc`:
+  - `on init`: `symlink /dev/block/platform/11120000.ufs/by-name/RADIO /dev/mbin0`.
+  - `service cpboot-daemon /vendor/bin/cbd -d -tss310 -bm -mm -P platform/11120000.ufs/by-name/RADIO`,
+    `class main`, `user root`, groups `radio cache inet misc audio sdcard_rw log sdcard_r shell system`,
+    `seclabel u:r:cbd:s0`.
+  - `on property:ro.vendor.multisim.simslotcount=*`: write it to
+    `/sys/module/modem_ctrl_ss310ap/parameters/ds_detect`.
+- cbd's usage text decodes the flags: `-d` daemon, `-t` modem type (`ss310`), `-b m` boot link = shared memory,
+  `-m m` main link = shared memory, `-P` the partition path of the CP binary (getopt string
+  `hdt:b:m:n:o:p:P:B:D:`). So cbd reads `modem.bin` straight from the RADIO block device. Note the type is
+  **ss310** in cbd and in the kernel config, while the DT says `ss360ap`. They are the same driver family.
+- `vendor/etc/ueventd.rc`: `/dev/umts*` 0660 system:radio; `/dev/umts_csd` system:loop_radio;
+  `/dev/umts_ciq*` system:bridge_rw; `/dev/umts_dm0`, `/dev/umts_router` radio:radio; `/dev/smd4`,
+  `/dev/ramdump_memshare` system:radio; `by-name/RADIO` 0660 system:radio; `by-name/CP_DEBUG` 0660 radio:system;
+  `/sys/devices/platform/10000.mif_pdata sim/ds_detect` 0660 radio:system. The rmnet devices are netdevs and get
+  no ueventd line.
+- cbd's ioctls (immediates found at the `ioctl` call sites, all `_IO('o', nr)`; names from `modem_prj.h:74-128`):
+  MODEM_ON 0x19, OFF 0x20, RESET 0x21, BOOT_ON 0x22, BOOT_OFF 0x23, BOOT_DONE 0x24, STATUS 0x27,
+  DL_START 0x28, FW_UPDATE 0x29, NET_SUSPEND/RESUME 0x30/0x31, DUMP_START 0x32, DUMP_UPDATE/LINK_CONNECTED 0x33,
+  CP_UPLOAD 0x35, DUMP_RESET 0x36, SET_TX_LINK 0x37, **XMIT_BOOT 0x40**, LINK_DEVICE_RESET 0x44,
+  GET/SET_SHMEM_SRINFO 0x45/0x46, GET_CP_BOOTLOG 0x47, MIF_LOG_DUMP 0x51, **SECURITY_REQ 0x53**,
+  CRASH_REASON 0x55. cbd does **not** call GET_SHMEM_INFO (0x41). It logs the security request as
+  `security_req: %x:%x:%x:%x`, which is `struct modem_sec_req { mode, size_boot, size_main, dummy }`
+  (`modem_prj.h:185-190`), and has "Request Security : secure mode / non-secure mode / dump mode" messages.
+- **The boot-channel handshake on the 9810's cbd**, from disassembly of `vendor/bin/cbd`: a helper writes a
+  4-byte word to `umts_boot0` and waits for a 4-byte reply ("send 0x%x, wait 0x%x"). Two builders wrap it, each
+  taking a stage number N:
+  - stage START: send `0x9000 | N<<8`, expect `0xA000 | N<<8`;
+  - stage DONE: send `0x900D | N<<8`, expect `0xA00D | N<<8`.
+  The CP can also post `0xA001 | N<<8` and `0xA00C | N<<8` inside a stage (cbd waits for them without sending).
+  The final step ("HANDSHAKE COMMAND : send & recv boot_done, fin message") is DONE(0) then START(0xF):
+  **0x900D → 0xA00D, then 0x9F00 → 0xAF00**. These are the values lsi uses for the 8890, so the open
+  question in step 7 of section 1.4 is answered: **unchanged on the 9810**. Stage numbers come from a run-time
+  table built from the TOC (44-byte entries). The exact per-stage N values need a log or deeper disassembly. The
+  stage log names are `STEP TOC`, `STEP LOADER` (BOOT), `STEP MAIN`, `STEP NV`, `STEP FIN`, with
+  `stage=%u, name:%s b_off=… m_offset=… b_size=…` and `TOC[%d].name = %s, b_off, m_off, size, crc`.
+- TOC entry names in cbd: `TOC`, `BOOT`, `MAIN`, `VSS`, `NV`, `OFFSET`, `LOADER` (plus `PSIRAM`/`SECPACK` for
+  Intel modems that the same binary also supports). cbd checks the TOC CRC ("TOC: CRC check fail twice!!!"),
+  can fall back to "CP img map from default table", and logs `vss_size:%lu`.
+- Properties cbd sets or reads: `vendor.cbd.boot_done`, `vendor.cbd.first_xmit_done`, `vendor.cbd.cpboot`,
+  `vendor.cbd.reset_done`, `vendor.cbd.rfs_check_done`, `vendor.cbd.deviceOffRes`, `vendor.cbd.dt_revision`,
+  `persist.vendor.cbd.*`, `ro.csc.sales_code`, `sys.powerctl`. It reads `androidboot.debug_level=` from the
+  kernel command line. Logs go to `/data/vendor/log/cbd` (dmesg, CP crash dumps, `cpcrash_cplog_dump_*.BTL`).
+- **EFS paths in cbd:** `/mnt/vendor/efs/nv_data.bin` (also `%s/nv_data.bin`), `/mnt/vendor/efs/nv_5g_data.bin`,
+  `/mnt/vendor/efs/fsm_data.bin`, `/efs/factory.prop`, `nvdata.bin`. cbd has code to create a default NV when the
+  file is missing (`create_empty_nv`, "nv not exist path = %s create default NV", "nv file write fail"). It
+  checks free space on EFS and stops on "EFS filesystem error - stop cpboot". The `%s/.%s_%s.bak` pattern in cbd
+  sits among the SR-info/CP-log code, not the NV code.
+- **But SELinux on this build gives cbd read-only EFS access.** `vendor/etc/selinux/vendor_sepolicy.cil`:
+  `allow cbd efs_file (file (read getattr lock map open …))`, `allow cbd bin_nv_data_efs_file (file (read …))`,
+  `allow cbd radio_block_device (blk_file (read …))`, `allow cbd vendor_radio_device (chr_file (ioctl read write …))`.
+  There is no write, create or unlink rule for cbd on any EFS type. So in practice cbd only **reads** RADIO and
+  `nv_data.bin`. The writer is rild (section 8.4).
+- `fstab.samsungexynos9810`: `EFS` → `/mnt/vendor/efs` ext4 rw (`errors=panic`); `CPEFS` → `/mnt/vendor/cpefs`
+  ext4 **`ro,noload`**. `init.samsungexynos9810.rc` bind-mounts them at `/efs` and `/cpefs`. Android itself never
+  writes CPEFS.
+
+### 8.3 Where the CP firmware comes from
+
+Only from the **RADIO partition** (`modem.bin`, read through `/dev/mbin0` / `-P …/RADIO`). `vendor/firmware`
+carries no CP file: it holds the ABOX/calliope images (`calliope_dram.bin`, `calliope_sram.bin`,
+`calliope_iva.bin`, `AP_AUDIO_SLSI.bin`, `APBargeIn_AUDIO_SLSI.bin`, `APBiBF_AUDIO_SLSI.bin`,
+`APDV_AUDIO_SLSI.bin`, `SoundBoosterParam.bin`, `dsm*.bin`, `vts.bin`), Wi-Fi/BT (`bcmdhd_*`, `bcm4361B2_*.hcd`,
+`nvram.txt_*`), camera (`fimc_is_*`, `setfile_*`, `HFD*`, `ois_fw_*`), `mfc_fw.bin`, `iva20_rt-lhotse.bin`,
+`cs47l92-dsp1-trace.wmfw`, `nfc/`, `score/`. The VSS voice image is the `VSS` entry inside `modem.bin`, not a
+vendor file. The per-device inputs are `nv_data.bin` on EFS and whatever the CP reads from CPEFS over RFS.
+`/data/modem.bin` in `ueventd.rc` is a leftover with no user in this build. `vendor/etc/plmn_*.bin` are RIL
+operator-name tables, not CP firmware.
+
+### 8.4 The RIL and the RFS server
+
+- `vendor/etc/init/init.vendor.rilchip.rc`: `service ril-daemon /vendor/bin/hw/rild` (no arguments), user radio,
+  capabilities `BLOCK_SUSPEND NET_ADMIN NET_RAW SYS_ADMIN CHOWN SYS_TIME`, `onrestart restart cpboot-daemon`;
+  `ril-daemon1 … rild -c 2` for the second slot, stopped when `ro.vendor.multisim.simslotcount=1`.
+  `secril_config_svc SimConfig` (on fs) and `NetworkConfig` (post-fs-data) set the multisim and default-network
+  properties.
+- `vendor/build.prop`: `vendor.rild.libpath=/vendor/lib64/libsec-ril.so`,
+  `vendor.sec.rild.libpath=/vendor/lib64/libsec-ril.so`, `vendor.sec.rild.libpath2=/vendor/lib64/libsec-ril-dsds.so`,
+  `ro.telephony.default_network=9,9`.
+- `libsec-ril.so` (19 KB) is a LineageOS shim ("sec-ril-smsc-shim") that `dlopen`s the real Samsung RIL
+  `/vendor/lib64/libsec-ril-impl.so` (4.5 MB) and only fixes the GET_SMSC_ADDRESS answer.
+- The real RIL speaks **Samsung IPC 4.1** (`IpcProtocol41*` classes; groups Misc, Net, Config, Data, Sim, Call,
+  Sms, Ss, Sound, Sap, Stk, Imei, Power, Pb, Gen, Ims, Rfs, Svcmode, Factory, …). It opens `/dev/umts_ipc0`,
+  `/dev/umts_rfs0` and `/dev/umts_boot0`, reads `/dev/mbin0`, and uses the data interface prefix `rmnet`.
+- **The RFS server is inside rild** (thread `ril-rfs`; `Nv::ProcessRfsMessage`, `IpcProtocol41Rfs`), not a
+  separate daemon. Its commands: `RFS_NV_READ_ITEM`, `RFS_NV_WRITE_ITEM`, `RFS_NV_WRITE_ALL_ITEM`,
+  `RFS_NV_BUFFER_MESSAGE`, `RFS_NV_RESTORE`, and the file-level `RFS_OPEN_FILE`, `RFS_CLOSE_FILE`, `RFS_READ_FILE`,
+  `RFS_WRITE_FILE`, `RFS_LSEEK_FILE`, `RFS_GET_FILE_INFO`, `RFS_GET_HANDLE_INFO`, `RFS_FTRUNCATE_FILE`,
+  `RFS_CREATE_FILE`, `RFS_UNLINK_FILE`, `RFS_RENAME_FILE`, `RFS_PUT_FILE`, `RFS_GET_FILE`, `RFS_MAKE_DIR`,
+  `RFS_REMOVE_DIR`, `RFS_OPEN_DIR`, `RFS_READ_DIR`, `RFS_CLOSE_DIR`, plus `RFS_EXT_CMD`. So the newer firmware's
+  file-level RFS (section 2) is confirmed. The RFS roots are `/mnt/vendor/efs` and `/mnt/vendor/cpefs`.
+  A modem config line logs `rfsIfName, nvHeader, modemDev, nvSize, nvDir, nvOffSet`.
+- **EFS files the RIL writes or manages** (from strings): `/mnt/vendor/efs/nv_data.bin`, its `%s.md5`, the
+  backups `%s/.%s_data.bak` and `%s/.%s_core.bak` (presumably `/efs/.nv_data.bak` and `/efs/.nv_core.bak`), an NV log
+  (`Nv::NvLog`, `ShrinkNvLog`), `/mnt/vendor/efs/telephony.prop`, `/mnt/vendor/efs/factory.prop`, and
+  `RFS_NV_RESTORE` (restore from backup). It reads `/efs/imei/*` (`mps_code.dat`, `omcnw_code*.dat`,
+  `replace_code.dat`, `selective`), `/efs/FactoryApp/serial_no`, `/efs/FactoryApp/keystr`,
+  `/mnt/vendor/efs/DAK/sakeccert0.der`. It sets `vendor.cbd.rfs_check_done` when its NV check is done.
+- SELinux agrees: `allow rild bin_nv_data_efs_file (file (read write getattr setattr lock append map unlink open …))`
+  (the label covers `/efs/nv_data\.bin(.*)`, so also the `.md5`), `app_efs_file` (FactoryApp) read-write,
+  `imei_efs_file` and `prov_efs_file` **read-only**.
+
+### 8.5 The call audio path (brief)
+
+- `vendor/etc/mixer_paths.xml`: the `incall-*`, `incall_nb-*` and `incall_wb-*` paths route **ABOX SIFS0** to the
+  codec (`ABOX UAIF1 SPK = SIFS0` for the receiver) and to `RSRC0 → WDMA0` (the call-record/echo-reference tap).
+  The speaker variant adds `UAIF1 → NSRC3 → WDMA4` and `RDMA7 → SIFS1`. There are separate `apcall-*` and
+  `wificall_*` paths for AP-side (VoIP, Wi-Fi calling) audio. So in a CS or VoLTE call the voice samples reach
+  ABOX's SIFS0 from the calliope voice path, which talks to the CP's VSS. This is not a plain PCM DMA from the AP.
+- `vendor/lib64/hw/audio.primary.universal9810.so` has a "Voice Manager", `is_usage_CPCall`, "Stopped CP Voice
+  Call", CP call-recording streams, and loads `libaudio-ril.so`. That library exports `SecRilSetVoicePath`,
+  `SecRilSetVoiceVolume`, `SecRilSetAudioMode`, `SecRilSetTxMute`/`RxMute`, `SecRilSetWbamr`,
+  `SecRilSetSoundClkMode`, `SecRilSetLoopback`, `SecRilSetVoLTEState`, …, i.e. the audio HAL tells the CP the
+  path, volume and clock mode through rild (the IPC SOUND group). A HakiOS voice path would need the same
+  messages plus calliope running.
+
+### 8.6 What this confirms and what it changes
+
+Confirmed:
+- `modem_if` at 0xF0000000, 0x9200000 (146 MB). The UEFI payload conflict in section 1.5 is real.
+- The shmem sizes and offsets, the mailbox at 0x14170000 / SPI 69, the CP IRQs 74 and 440, the mailbox register
+  and bit assignments, the 21 iodevs and their channels, `link_attrs 0x7C9`, SIPC 5.
+- The running kernel is GPL `e590666`, so the cited driver code is what Android runs.
+- The boot handshake values: 0x900D → 0xA00D and 0x9F00 → 0xAF00, now known to be part of a general
+  `0x9N00/0xAN00` start and `0x9N0D/0xAN0D` done scheme per stage.
+- The TOC names `BOOT`, `MAIN`, `VSS`, `NV`, `OFFSET` (and `TOC`, `LOADER`).
+- `modem.bin` only on RADIO; no CP firmware in vendor.
+- Newer firmware uses file-level RFS on `/efs` and `/cpefs`.
+
+Changed or corrected:
+- **`cp_ram_logging` is at 0xF9200000, not 0xF91F0000** (section 1.2 had an arithmetic slip; the GPL DTS has
+  `reg = <0 4179623936 33554432>` = 0xF9200000). It runs to 0xFB1FFFFF, and ABOX's 40 MB `abox_rmem` follows at
+  0xFB200000. The range to keep out of XNU is **0xF0000000-0xF91FFFFF for `modem_if`**, plus 0xF9200000-0xFB1FFFFF
+  if CP RAM logging is enabled, which the CP may expect.
+- **cbd does not write EFS on this build.** SELinux gives it read-only access. All NV writes, the `.md5`, the
+  `.nv_data.bak`/`.nv_core.bak` backups and NV restore are done by **rild's RFS server**. Our kernel replaces both,
+  and the "RAM overlay, never flushed" rule in section 2 covers both.
+- **`modem_pktlog` is not built** (`CONFIG_DEBUG_PKTLOG` is off). The M1 capture needs another method (an
+  `LD_PRELOAD`/strace-style interposer on rild's `read`/`write` of `umts_ipc0`/`umts_rfs0`, or a kernel with
+  pktlog on).
+- **`CP_ZEROCOPY` is on.** Downlink IP packets come through the ZMB region (0xF8500000, 11 MB), so the M2 data
+  path must handle ZMB as well as the SBD rings.
+- `shmem@F6E00000` has no `reg`. Do not read 0xF6E00000 as an address.
+- There is no separate RFS daemon and no `vcd`/`DIAG` binary in this vendor (init references them but they are
+  absent). Only cbd and rild matter.
+
+### 8.7 Recommended first kernel step
+
+Unchanged in order, sharper in detail:
+1. Move the XNU payload out of 0xF0000000 and reserve **0xF0000000-0xFB1FFFFF** (`modem_if` + `cp_ram_logging`)
+   uncached. 0xFB200000 onward is ABOX's and is already handled by the audio driver.
+2. Then the first code is `hakios.shannon.c` step 1 only: map the mailbox (0x14170000, SPI 69) and the region, and
+   **read** `mbx_cp2ap_united_status` (register 3) and the TOC/memory map at region + 0x200 + 0xA0 (left by the
+   bootloader if S-Boot preloaded anything). This is read-only, needs no SMC, and tells us whether Carbon and
+   the cold-boot state let us see the CP at all. After that comes `IOCTL_SECURITY_REQ` mode 2 (SMC 0x82000700)
+   through Carbon, the first call that can fail at EL3.
