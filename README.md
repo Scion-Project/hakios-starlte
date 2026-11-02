@@ -352,6 +352,22 @@ reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_s
 Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
 it the way Android does, but never arms its hardware trip. Written, not yet run.
 
+## Powering off
+
+A halt (iOS's "slide to power off", or `halt` at the console) used to hand the phone back to the loader and no more:
+nothing let the PMIC's rails go, and the panel, an S6E3HA8 in MIPI command mode, keeps a copy of the last frame in its
+own memory and goes on showing it with nothing sending it anything, so the phone looked frozen on the last spinner
+frame. `halt_off=N` (`drivers/power/hakios.exynos_poweroff.c`, built in, off by default) makes a halt a power-off.
+`halt_off=1` saves the data volume, blanks the panel through DSIM0's command FIFO (DCS display-off, 0x28, and sleep-in,
+0x10, each between the level-1 key, as Samsung's display-off and exit sequences send them, then their 100 ms), then
+lets go of PS_HOLD (the PMU's PS_HOLD_CONTROL at 0x14060000 +0x330C, bit 8), as Samsung's `sec_power_off()` does: the
+phone is off and the log is lost with it. `halt_off=2` first asks the APM to stop as well (ACPM's STOP request on the
+acpm node's channel 4, Samsung's `acpm_enter_wfi()`, which `exynos_acpm_reboot()` sends before every PS_HOLD). With a
+charger reported by the battery driver, or the phone still running a second after PS_HOLD (a charger it did not see,
+the power key still held), the halt goes the loader's way as before, the panel already dark: TWRP, with the log. The
+same PS_HOLD is `tmu_off=1`'s (Temperatures, above). Without `halt_off`, a halt is what it was. Written, not yet run;
+whether PS_HOLD alone powers the S9 off while the APM still runs (Samsung never tries it) is what runs 26 and 27 tell.
+
 ## USB: the whole log and a console over the cable
 
 pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
@@ -419,6 +435,8 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 23 | `mali=9`, root `GL=1 NO_AIR=1` with `gl=0` | "mali_test: 4: ... the word 0xc0ffee01 -- THE GPU WROTE IT" ([GPU.md](GPU.md), run G1) |
 | 24 | `mali=9`, the same root | "HakiosMali: a client opened the GPU" (backboardd), and every minute "M job chains (0 failed)" with M growing; then `RC_JOBS=rc.jobs.gltest`: "mali: gl_test drew on THE MALI" (G2, G3) |
 | 25 | `mali=9`, root `GL=1` (with the AIR library) and `RC_JOBS=rc.jobs.malimetal` | "the compiler library Mali-G72 ...", "drvtest: dispatched image_calcminmax0: status 4", the drawn pixel equal to softpipe's (M1) |
+| 26 | `halt_off=1`, no charger in, then power off from iOS (or `halt` at the console) | the screen goes black and the phone is off: the power key starts it again into BOOT, not TWRP; if it lands in TWRP instead, the log ends with "halt_off: 3: still running a second after PS_HOLD" or "a charger is attached" (Powering off, above) |
+| 27 | `halt_off=2`, the same | the same, after "halt_off: 2: the APM asked to stop ... answered (0)"; run it if run 26 stays on |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
