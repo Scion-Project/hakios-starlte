@@ -127,8 +127,35 @@ and the scripts; without it the default image has no Bluetooth jobs, as before (
 
 Not done: powering the chip from iOS. BlueTool's `power`, `reset` and `wake` commands go, on a UART, to
 `/dev/btpoweroff`, `/dev/btreset` and `/dev/btwake` (its strings), none of which exist here, and the scripts do not use
-them: the chip stays powered from bt=7 on, and turning the switch off in Settings has not been tried. Nor have pairing
-and audio.
+them: the chip stays powered from bt=7 on, and turning the switch off in Settings has not been tried.
+
+### Pairing
+
+Seen on phone 1, 3 November (morning-1103b), with a Sony WH-1000XM3: Settings lists it, a tap pairs it (Secure Simple
+Pairing, "Pairing has completed with result 0", the link key stored, "Encryption E0 enabled", "device connected") and
+about 20 s later bluetoothd aborts itself: "Watchdog_Timer - Stack Mutex try lock failed and watchdog has struck twice
+-- abort". launchd starts it again and the headphones are gone. What it was doing: the XM3 offers iAP (Apple's
+accessory protocol) on an RFCOMM channel, and as soon as the device is paired bluetoothd opens its "Wireless IAP"
+profile: it makes a PTY ("Tried to open PTY with central = 17, peripheral = 18, name = /dev/ttys000 - result was 0"),
+would hand the peripheral end to the accessory server (`com.apple.accessories.transport-server`, which this system
+does not have: "Could not establish connection to IAP") and writes what the headphones send over iAP into the
+central end, from its stack thread, with the stack's mutex held. Nobody reads the other end; the PTY fills, the
+write() sleeps in the kernel for good, and the watchdog finds the mutex taken. bluetoothd itself makes that end
+non-blocking in one of its configurations (after `openpty`, `fcntl(F_SETFL, | O_NONBLOCK)`, logged "Flags are ..."),
+not in the one this phone gets. So `BT=1` also puts `libhakios.bluetoothd.dylib` (`userland/src/inject_bluetoothd.c`)
+into bluetoothd, which makes `openpty`'s central end non-blocking: a write the PTY has no room for is dropped instead
+of stopping the stack. iAP itself goes nowhere (no accessory server); A2DP, AVRCP and HFP do not use the PTY.
+
+The address: bt=7 now gives the chip the phone's own (Broadcom's Write_BD_ADDR, 0xFC01) from `/bluetooth/bt_addr` of
+its EFS partition, read only, as Samsung's Android does ("bt: 7: Write_BD_ADDR (0xFC01) d8:68:c3:33:5b:ce from the
+phone's EFS:/bluetooth/bt_addr"); before, every S9 had Broadcom's default 43:61:b2:00:1f:ac, two phones the same.
+`bt_addr=` gives another, `bt_addr=0` keeps the default. (EFS has the ext4 feature ENCRYPT; the kernel's reader now
+takes it and refuses only the inodes that are encrypted.)
+
+For the next problem of this kind: `sysctl kern.hakios.bt_trace=N` on the USB console (or boot-arg `bt_trace=N`)
+puts the H4 packets of `com.apple.uart.bluetooth` on the console, both ways, at most N lines a second; and a program
+that calls abort() now has every one of its threads written to the log (`ustacks:` lines, with x16, the system call a
+thread is in).
 
 ## Before it ran: what iOS's Bluetooth would need (the plan, kept)
 
