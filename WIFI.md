@@ -230,6 +230,19 @@ VENDOR): every step says what it does before it does it, so the log shows where 
 If b times out on the first command (`Timeout on response`), the chip cannot reach memory: the PCIe SysMMU (0x11420000)
 and SYSREG_FSYS1's I/O coherency are what to look at next (above). If only INTx fails, keep `brcmfmac_poll=1`.
 
+wifi-a5 (`brcmfmac_tcm_idx=1`): step 6 read the SysMMU (CTRL 4, set to 0 for bypass) with its CMU_FSYS1 gate forced on
+(00300000), but a later read of its registers from the poller (`hakios_exynos_pcie_say_dma()`, symbolicated) stopped the
+bus, a synchronous external abort (`fault_code=0x10`). Since wifi-a6 the SysMMU's registers are left alone unless
+`wifi_pcie_mmu_probe=1`; its gate is still forced on, as the radio's DMA may cross it in bypass.
+
+wifi-a6: no abort; DMA both ways (the first ioctl's request read, its acknowledgement written), then `Dongle setup
+failed`: no ioctl response buffer had been posted, as brcmfmac's control buffers are 8 KB and the pool's slots were 4 KB
+(16 KB slots since). wifi-a7: stages a and b, the CLM loaded, `Firmware: BCM4361/5 wl0: Aug  9 2021 ... 13.50.37`,
+`lx: the interface wlan%d is up`, the station offered. wifi-a8: the USB console's `wifi scan` ran brcmfmac's escan, but no
+event reached it (`brcmf_escan_timeout: timer expired`): `eth_type_trans()` left the MAC header where brcmfmac looks
+for the event. wifi-a9: stage c, `lx: a scan for the kernel: 0 channels named (0: all), asking: 0; 7 access points heard
+in 2306 ms`, on 2.4 and 5 GHz, listed by the USB console's `wifi scan`. Next: stage d (`brcmfmac=8`).
+
 Sources: the S9's kernel at e5906667068e (`drivers/pci/host/pci-exynos*.c` and `pci-exynos.h`: ELBI's interrupt
 registers, `exynos_pcie_enable_interrupts()`, `exynos_pcie_irq_handler()`;
 `drivers/net/wireless/broadcom/bcmdhd_101_12/dhd_custom_exynos.c`, `dhd_custom_cis.c` (`.mac.info`),
