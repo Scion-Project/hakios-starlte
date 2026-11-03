@@ -13,7 +13,7 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 
 **State: iOS 16.5 runs on the phone, from its own flash, as a daily-usable system.** Seen working on the phone (1 to
 3 November 2026), and on by default on every image (Defaults, below):
-- six cores, the A55s 2 and 3 and the four M3s (`cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1`; The cores), the
+- all eight cores, the four A55s and the four M3s (`cpus=8 bootcpu=2 m3_prep=3 pan=0 isa_floor=1`; The cores), the
   clusters' clocks moved by the governor with the load and the touch screen (`cpufreq_gov=1`; CPU clocks);
 - the storage: iOS's system from SYSTEM through the kernel's own UFS driver (`ufs=3`), `/private/var` kept between runs
   in USERDATA (`ufs_write=1 var_hfs=ufs_USERDATA_data`); the RTC's time of day (`rtc_pmic=1`);
@@ -33,8 +33,7 @@ at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH
 "iPhone Microphone" (`abox_mic=1`, given for a run; AUDIO.md, "The microphone in iOS").
 
 Not working yet: the headphones (written behind `cs47l93_hp=1`, not yet tried: AUDIO.md), Bluetooth in iOS
-(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras and the seventh
-core (core 1, which S-Boot parks: The cores). The
+(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md) and the rear cameras. The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -194,10 +193,13 @@ instead.
 Cores 0-3 are Cortex-A55s (MPIDR 0x000-0x003). Cores 4-7 are Exynos M3s (0x100-0x103, 2.7 GHz), which Carbon's PSCI
 starts. The loader numbers them through `platform_starlte.core_mpidr`. `cpus=2 bootcpu=2` (the SoC's own
 configuration, and what a bare line `mkimage.sh -n` falls back to) gives the kernel A55s 2 and 3; the S9's defaults give it
-six cores (below). Seen on the phone from 30 October 2026:
+all eight (below). Seen on the phone from 30 October 2026:
 
-- core 1: S-Boot powers it up and parks it before the hand-over, so CPU_ON for it never brings it to the kernel (the loader
-  leaves it out: `platform_starlte.parked_cores`);
+- core 1: S-Boot starts it for its own display work ("[boot_exynos] Powers up core(1)", then log lines headed `[1:`) and has
+  it off again by the hand-over. The first run on this phone (29 October) started the kernel on it, got nothing back, and took
+  it for a core that never comes; that kernel had no patch 1504 yet, so it read core 1's MPIDR (0x81000100) as an M3's number.
+  With patch 1504 CPU_ON for it answers 0 and the core is in the kernel 1.1 ms later (seen 3 November). `core1=1` lists it
+  (`platform_starlte.parked_cores` leaves it out otherwise; below);
 - the M3s: the firmware's CPU_ON for one (Carbon, then Samsung's EL3) never returns, and the processor that asked stays
   inside it for good (patch 1505's log). The likely reason, from source (below): six PMU fields of the big cluster that
   Samsung's kernel writes before it starts any other core, and nothing here did. `m3_prep=N` writes them;
@@ -240,6 +242,36 @@ CRC32; nothing of ISAR1, MMFR2 or PFR1; PFR0's FP and AdvSIMD without half preci
 diagnostics used on the way (patch 1509 also maps esslog's buffer uncached, so that a hard hang keeps its last lines);
 none is needed for the boot. Booting on an M3 (`bootcpu=4`) has not been tried.
 
+**All eight: `cpus=8`, with `ufs=3`** (seen on the phone, 3 November 2026: `hw.ncpu` 8, `hw.activecpu` 8, the governor's "lit
+... 4 online ... big ... 4 online"). On this SoC the loader takes `cpus=8` for `core1=1` and, with `ufs=3`, `core0=1`, which the
+line has no room to say (607 characters); `core0=0` keeps core 0 the loader's. Core 1 starts as core 3 does, by CPU_ON, 28 s into the run with the other
+slower cores (`small_cores_after=`). Core 0 is the loader's for as long as the kernel needs it: it serves the storage
+(`ufs=3` up to the switch), feeds the watchdog, watches the kernel's heartbeat and writes the log on a hang. After `ufs=3`'s
+switch the kernel needs none of that, and with `core0=1` it takes the core (patch 1513, `osfmk/arm64/psci_smp.c`;
+`xnuloader/loader.c`, `core0_into_kernel`):
+
+1. the loader lists its own core last among the kernel's (`cores for the kernel, in the order it takes them: 2 3 1 100 101
+   102 103 0`) and writes its MPIDR into the kernel's box; the kernel does not start it ("psci: cpu 7 (MPIDR 0x0) is the boot
+   loader's core (core0=1): not started now");
+2. once the loader only watches (24 s in) it offers the core, with where it comes back to and the watchdog to feed;
+3. after the switch ("ufs: nufs: step 5: switched"), or when the core gets its number if the switch came first, the kernel
+   asks: "psci: cpu 7, the boot loader's core: nothing needs the loader any more (core0=1); asking for it";
+4. the loader quiets its timers and its half of the GIC, empties its caches and jumps to the kernel's entry with its MMU off,
+   as CPU_ON would have started the core: "psci: cpu 7: stage 3 after 1035 us (the loader: 3)", "psci: cpu 7: the loader's core
+   has joined: 8 processors are running (hw.ncpu 8)";
+5. the kernel feeds the cluster watchdog every 10 s from then on (the loader armed it for 60 s); a request to the loader's
+   storage service fails at once ("ufs: a request to the loader ..., whose core is the kernel's now: refused");
+6. on the way out (the console's `return`, `loader_return_after=`, a panic) the core is not switched off but given back
+   ("psci: cpu 7 (the boot loader's core) goes back to the loader"); the loader takes up its watch and the run ends as before
+   (the log into the pstore RAM, the restart into recovery).
+
+While the kernel has the core, a whole-system hang is the watchdog's to catch (a restart into BOOT, the run again), not the
+loader's: no "THE KERNEL HUNG" log in the pstore, and what is left of the kernel's log is in `exynos_ss` with `esslog=1`. The
+governor, the thermal limits and `isa_floor` take the two new cores as they take the others: all three go by cluster and by
+which cores have been idle. Without `core0=1`, or with `ufs=2`, nothing changes: the core stays the loader's. `core0=2`
+asks for the core at once, for a loader that serves the kernel nothing (QEMU, `QEMU_GIC=2 QEMU_SMP=8`, `cpus=8 bootcpu=1
+core0=2`); on this phone the storage still needs the loader then, so it is not for here.
+
 ## Build
 
 In the kernel's common repository, with this repository at `devices/starlte` (`tools/hakios-device.py sync starlte`):
@@ -270,7 +302,8 @@ boot-arguments, which are `configs/starlte.config`'s (its last part, "The S9's d
 --defconfig starlte_defconfig` prints them). No other device's defaults change with them.
 
 ```
-cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1            six cores (The cores)
+cpus=8 bootcpu=2                                        all eight cores (The cores)
+m3_prep=3 pan=0 isa_floor=1                             what the M3s need (The cores)
 exynos_keys=1 max77705=1 panel=1 s6sy761=1              the keys, the battery and charger, the panel, touch
 max77705_usbsw=1 usb_gadget=5                           the USB-C port to the SoC, the log and console over USB
 cpufreq_gov=1 mali=9 mali_gov=1                         the CPU governor (and touch boost), the GPU and its clock
@@ -316,9 +349,11 @@ leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the inst
    outlasted the watchdog). If the phone hangs or comes back into HakiOS, hold Vol Down + Power until it restarts,
    then at once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
 
-The default command line (Defaults, above, and `-v` from `mkimage.sh` unless `-q`) runs the kernel on six cores and leaves
-core 0 to the loader, which serves the flash and watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
-the phone, so a hang leaves something to read. `-v` shows the kernel's log on the screen while it starts.
+The default command line (Defaults, above, and `-v` from `mkimage.sh` unless `-q`) runs the kernel on all eight cores. Core 0
+is the loader's until `ufs=3`'s switch, while it serves the flash and watches: a hang before that has its log written into the
+pstore RAM and the phone restarted. After the switch the core is the kernel's, and a hang is the watchdog's to catch (a restart
+into BOOT; `esslog=1` keeps the kernel's log in `exynos_ss`). `core0=0` keeps the core with the loader for a run whose hang you
+want the log of. `-v` shows the kernel's log on the screen while it starts.
 
 What to look for, in this order:
 1. HakiOS's logo (the UEFI started).
@@ -447,8 +482,8 @@ loader (`ufs=2`, unchanged). In order, each step said in the log before it is ta
 The loader (`xnuloader/loader.c`) takes `ufs=3` for `ufs=2`, and refuses every request while its page says the kernel's
 list is in, so UEFI's driver never rings behind a list that is not its own. Core 0 stays the loader's: it is the
 reference and the fallback, and it also feeds the cluster watchdog, watches the kernel's heartbeat and writes its log on a
-hang. Giving core 0 to the kernel (`cpus=7`, the kernel started on core 0 without `bootcpu=`) needs a loader that reads the
-references before it jumps, and a kernel that feeds the watchdog and keeps its own log; that is the next step, not this one.
+hang -- unless `core0=1`, with which the kernel takes it after the switch and gives it back at the end (The cores, above);
+the fallback through the loader is then gone, and a read that fails after the switch is an error.
 
 The first runs, one image each, the log read in TWRP (pstore) or over USB (`usb_gadget=5`):
 
@@ -915,8 +950,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Wi-Fi | works (joined from Settings, DHCP, the Internet); next: roaming, power saving ([WIFI.md](WIFI.md)) |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
 | Storage, writing | /private/var kept in USERDATA works (above); next an image with ReportCrash allowed for crash reports |
-| The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
-| The seventh core | core 1, which S-Boot parks before the hand-over (The cores): not reached yet |
+| The M3s | all four run; booting on an M3 (`bootcpu=4`) has not been tried |
 | The low RAM bank | its free RAM is XNU's beside the 2 GB window (Memory layout, "The low bank's free RAM"): 3218 MB in all; next, the drivers with 32-bit DMA could take their buffers from it instead of fixed ranges |
 | Sensors | the hub reads six sensors and iOS takes orientation and proximity (`shub=6`, [SENSORS.md](SENSORS.md)); a default once the line has room; the gyroscope's and magnetometer's units, auto-brightness |
 | The modem, the rear cameras | the Shannon CP ([docs/modem-plan.md](docs/modem-plan.md)) and the rear cameras are not started |
