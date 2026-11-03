@@ -121,6 +121,22 @@ page of them from UEFI as reserved memory (`keep_out_reserve`), so nothing UEFI 
 lands there, and XNU's window is never allowed to cover them. XNU's memory is only `[physBase, physBase + memSize)`, so it never
 has them as free memory.
 
+**Why XNU has 2 GB of the 4.** The window is the largest free block of UEFI's memory map (`choose_window`): the whole upper
+bank, 0x880000000-0x8FFFFFFFF, `memSize` 0x80000000. The lower bank's free RAM (about 1.2-1.4 GB once the keep-outs, the
+reserved-memory nodes, UEFI, the loader, the payload and the drivers' buffers above are taken out, in a dozen pieces) is
+not XNU's, and cannot be made so by the loader: XNU 8796's arm64 VM takes exactly one contiguous range of RAM. `boot_args`
+has one `physBase` and one `memSize`; `arm_vm_init` maps `[gPhysBase, real_avail_end)` as the physical aperture; pmap's
+`pmap_next_page` hands out `avail_start..avail_end` in one sweep (the open source has no RAM-range table:
+`initialize_ram_ranges` counts one range); `pa_valid()` and the pv and attribute tables are indexed from `vm_first_phys`;
+and the bootstrap page tables map `[physBase, topOfKernelData)`. One window over both banks would be 34 GB wide (the lower
+bank ends at 4 GB, the upper begins at 34 GB): 30 GB of holes in the aperture as normal memory (speculative reads into
+nothing), page tables and pv tables sized for 34 GB, and every hole to be kept out of the free list -- a VM change,
+not a loader one. The other ways (a second free list for the lower bank's pages, which pmap would treat as unmanaged; the
+lower bank as an I/O range for IOKit's buffers) are not general RAM either. So the gain is not taken here; what it would
+be is said in every run: "memory: outside that block UEFI has N MB free in M ranges (the largest ...)" after "largest free
+block", and with `memmap=1` the whole map (as `oem memmap`). The lower bank already holds what wants 32-bit addresses
+(the display's and the camera's buffers above) outside XNU's 2 GB.
+
 ## The cores
 
 Cores 0-3 are Cortex-A55s (MPIDR 0x000-0x003). Cores 4-7 are Exynos M3s (0x100-0x103, 2.7 GHz), which Carbon's PSCI
@@ -128,7 +144,11 @@ starts. The loader numbers them through `platform_starlte.core_mpidr`. The defau
 the kernel A55s 2 and 3, the only cores it can have so far (seen on the phone, 30 October 2026):
 
 - core 1: S-Boot powers it up and parks it before the hand-over, so CPU_ON for it never brings it to the kernel (the loader
-  leaves it out: `platform_starlte.parked_cores`);
+  leaves it out: `platform_starlte.parked_cores`). By the PMU it is off when the kernel runs (CLUSTER0 core 1 STATUS
+  0x880000 in the m3 driver's lines, as core 3 before its CPU_ON), and Carbon's AFFINITY_INFO is a stub that answers "on" of
+  every core (`psci_affinity_info`, "TODO!"): what EL3 makes of it is unknown, and its CPU_ON answers 0 and nothing comes.
+  `core1=1` lists it for the kernel to try all the same (5 s of waiting at the boot, logged: "core 1 is parked by the boot
+  loader; core1=1: listed for the kernel to try", then the kernel's "psci: cpu N (MPIDR 0x1) ..." lines);
 - the M3s: the firmware's CPU_ON for one (Carbon, then Samsung's EL3) never returns, and the processor that asked stays
   inside it for good (patch 1505's log). The likely reason, from source (below): six PMU fields of the big cluster that
   Samsung's kernel writes before it starts any other core, and nothing here did. `m3_prep=N` writes them;
@@ -170,6 +190,34 @@ CRC32; nothing of ISAR1, MMFR2 or PFR1; PFR0's FP and AdvSIMD without half preci
 8.2 set, was killed with SIGILL once it ran on an M3. `m3_diag=1`, `m3_flush=1` and `m3_ids=1` (patch 1509) are the
 diagnostics used on the way (patch 1509 also maps esslog's buffer uncached, so that a hard hang keeps its last lines);
 none is needed for the boot. Booting on an M3 (`bootcpu=4`) has not been tried.
+
+**The loader's core, the kernel's (`core0=1`, with `ufs=3`; written, not yet seen on the phone).** Core 0 is the loader's
+for as long as the kernel needs it: it serves the storage (`ufs=2`, and `ufs=3` up to the switch), feeds the watchdog,
+watches the kernel's heartbeat and writes the log on a hang. After `ufs=3`'s switch the kernel needs none of that, and with
+`core0=1` it takes the core (patch 1511, `osfmk/arm64/psci_smp.c`; `xnuloader/loader.c`, `core0_into_kernel`):
+
+1. the loader lists its own core last among the kernel's (`cores for the kernel, in the order it takes them: 2 3 100 101 102
+   103 0`) and writes its MPIDR into the kernel's box ("core0=1: this core (0) goes to the kernel when it asks"); the kernel
+   does not start it ("psci: cpu 6 (MPIDR 0x0) is the boot loader's core (core0=1): not started now");
+2. once the loader only watches (24 s in) it offers the core: "core0: offered to the kernel after N s (... the watchdog
+   10060000, ... counts, the kernel's to feed while it has the core)";
+3. after the switch ("ufs: nufs: step 5: switched") the kernel asks: "psci: cpu 6, the boot loader's core: the storage no
+   longer needs the loader; asking for it", "psci: cpu 6 (MPIDR 0x0): asked of the loader with entry 0x...; the watchdog
+   fed here from now on";
+4. the loader quiets its timers and its half of the GIC and jumps to the kernel's entry with its MMU off, as CPU_ON would
+   have started the core; the kernel logs "psci: cpu 6: stage 1/2/3 ...", "psci: cpu 6: the loader's core has joined: 7
+   processors are running (hw.ncpu 7)";
+5. the kernel feeds the cluster watchdog every 10 s from then on (the loader armed it for 60 s); a request to the loader's
+   storage service fails at once ("ufs: a request to the loader ..., whose core is the kernel's now: refused");
+6. on the way out (`loader_return_after=`, a panic) the core is not switched off but given back ("psci: cpu 6 (the boot
+   loader's core) goes back to the loader"); the loader logs "core0: back in the loader after N s with the kernel", takes up
+   its watch, and the run ends as before (the log into the pstore RAM, the restart into recovery).
+
+While the kernel has the core, a hang is the watchdog's to catch (a restart into BOOT, the run again), not the loader's (no
+"THE KERNEL HUNG" log in the pstore); what is left of the kernel's log is in `exynos_ss` with `esslog=1`. A hang between
+the jump and the core's "stage 3" is possible on the first run and would end the same way. Without `core0=1`, or with
+`ufs=2`, nothing changes: the core stays the loader's. `cpus=8 bootcpu=2 m3_prep=3 pan=0 core0=1 ufs=3` gives the kernel
+seven cores (A55s 0, 2, 3 and the four M3s); core 1 is the eighth only if `core1=1` ever brings it.
 
 ## Build
 
@@ -343,8 +391,8 @@ loader (`ufs=2`). `ufs=2` stays the default and is unchanged. In order, each ste
 The loader (`xnuloader/loader.c`) takes `ufs=3` for `ufs=2`, and refuses every request while its page says the kernel's
 list is in, so UEFI's driver never rings behind a list that is not its own. Core 0 stays the loader's: it is the
 reference and the fallback, and it also feeds the cluster watchdog, watches the kernel's heartbeat and writes its log on a
-hang. Giving core 0 to the kernel (`cpus=7`, the kernel started on core 0 without `bootcpu=`) needs a loader that reads the
-references before it jumps, and a kernel that feeds the watchdog and keeps its own log; that is the next step, not this one.
+hang -- unless `core0=1`, with which the kernel takes it after the switch and gives it back at the end (The cores, above);
+the fallback through the loader is then gone, and a read that fails after the switch is an error.
 
 The first runs, one image each, the log read in TWRP (pstore) or over USB (`usb_gadget=5`):
 
