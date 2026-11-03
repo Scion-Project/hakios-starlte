@@ -8,7 +8,7 @@ schema_version = 1
 name = "starlte"
 soc = "Exynos 9810"
 os_profile = "ios-16.5-20F66"
-summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-2 November 2026: six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with TMU throttling, UFS root and persistent /var, RTC. Wi-Fi and camera in progress; modem planned."
+summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s. Not yet: microphones and headphones, Bluetooth, sensors, modem, rear cameras, core 1, the low RAM bank."
 
 [[area]]
 id = "upstream"
@@ -30,12 +30,12 @@ status = "implemented"
 components = []
 paths = ["board.toml", "porting.toml", "device.conf", "configs/*", "soc/*", ".gitignore", ".github/*"]
 inputs = ["Samsung Galaxy S9 SM-G960F (starlte), Exynos 9810 (S5E9810): 4 Cortex-A55 (MPIDR 0x000-0x003) and 4 Exynos M3 (0x100-0x103), Mali-G72 MP18, 4 GB RAM.", "Kernel tree: Scion-Project/hackios-xnu-kernel main, which pins this repository by revision in devices/manifest.conf."]
-configuration = ["configs/starlte_defconfig and configs/starlte.config (EXYNOS_M3, EXYNOS_CAMERA and the S9 drivers built); soc/configs/exynos9810.config; soc/soc.conf.", "Drivers are off by default and enabled per run by boot-args (e.g. cpus=6 bootcpu=2 m3_prep=3 pan=0 s6sy761=1 max77705=1 panel=1 mali=9 fb_dpp=1 cpufreq_gov=1 usb_gadget=5)."]
+configuration = ["configs/starlte_defconfig and configs/starlte.config (EXYNOS_M3, EXYNOS_CAMERA and the S9 drivers built); soc/configs/exynos9810.config; soc/soc.conf.", "The S9's defaults, the configuration seen working on the phone, are CONFIG_ symbols at the end of configs/starlte.config: devices/starlte/mkimage.sh puts them on every image's command line (cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1 ... ufs=3 ... fb_zc=1 cam_s9=7 cam=5 abox=8 max98512=3 wifi_pcie=6 brcmfmac=8 wifi=1), and a run's own arguments go over them by name. Drivers not yet seen working stay off until their argument is given."]
 procedure = ["tools/hakios-device.py sync starlte in the kernel tree, then make starlte_defconfig && make kernel."]
-findings = ["Each driver goes up in logged steps (driver=N) so a first phone run is safe; device.conf records each subsystem as seen on the phone, or written and not yet seen."]
+findings = ["Each driver goes up in logged steps (driver=N) so a first phone run is safe; device.conf records each subsystem as seen on the phone, or written and not yet seen. Diagnostics (fps_log, systrace, *_probe, *_log) are never defaults."]
 completion = ["The kernel builds with starlte_defconfig and the image boots iOS 16.5 on the phone (see firmware and cpu)."]
-limits = ["The defaults are conservative; the installer's arguments turn on the drivers that have been seen working."]
-next_action = ["Move drivers seen working to on-by-default in the configuration."]
+limits = ["The kernel's command line holds 607 characters: the defaults take 422 and a run about 155 more (CONFIG_CMDLINE_RUN), so a run's added diagnostics have about 30 left; mkimage.sh warns past that."]
+next_action = ["Add each driver to the defaults once it is seen working on the phone (Bluetooth, the torch, the microphones)."]
 
 [[area.evidence]]
 kind = "source"
@@ -105,7 +105,7 @@ status = "device-verified"
 components = []
 paths = ["uefi/files/*"]
 inputs = ["RAM 0x80000000-0xFFFFFFFF and 0x880000000-0x8FFFFFFFF (4 GB); secure holes removed by Silicium's RamManagerLib.", "reserved-memory of Samsung's device tree: modem_if 0xF0000000-0xF91FFFFF, cp_ram_logging, exynos_ss, ABOX."]
-configuration = ["Payload at 0xD0000000 + 64 MB after payload_move; fb_dpp buffers at 0xD4000000; camera frame at 0xD8000000 + 8 MB; XNU's RAM the largest free block at 0x880000000 + 2 GB."]
+configuration = ["Payload at 0xD0000000 + 64 MB after payload_move; the display's scan-out buffers 0xD4000000-0xD6FFFFFF; the camera's frames 0xD8000000-0xD9FFFFFF; UFS's own mode 0xDA000000 + 4 MB; Wi-Fi's optional DMA pool 0xDC000000 + 44 MB; fb_zc's pool 0xDEC00000-0xE18FFFFF; one table with build-time non-overlap checks in the kernel's sys/hakios.exynos9810_mem.h. XNU's RAM the largest free block at 0x880000000 + 2 GB."]
 procedure = ["The loader reserves the CP, ABOX and exynos_ss pages from UEFI (keep_out_reserve) and chooses XNU's window around them (choose_window)."]
 findings = ["None of XNU's RAM is below 4 GB, so 32-bit DMA engines (DECON's DPP, the camera's WDMA, DWC3 descriptors) use fixed buffers below 4 GB mapped through IOKit.", "An 11 MB ml_io_map_wcomb of the display buffers panicked; mapping them through IOKit works."]
 completion = ["Boots with the payload out of the modem region and the 32-bit DMA buffers below 4 GB."]
@@ -125,12 +125,17 @@ status = "device-verified"
 components = []
 paths = ["mkimage.sh"]
 inputs = ["UFS 2.1 host on the Exynos 9810 (0x11120000), as Silicium's UEFI leaves it; GPT on LUN 0 (SYSTEM, USERDATA and the rest)."]
-configuration = ["ufs=2 (default): block I/O through the loader and the UEFI's block service; system_apfs=ufs_SYSTEM.", "ufs_write=1 var_hfs=ufs_USERDATA_data: /private/var on an HFS+ volume in USERDATA, made once from TWRP.", "ufs=3 ufs_native_ro=1: the kernel's own UFS driver takes the controller after a self-test against the loader's reads (PR 155 / hakios-starlte PR 33)."]
+configuration = ["ufs=3 system_apfs=ufs_SYSTEM ufs_write=1 var_hfs=ufs_USERDATA_data, the defaults: the kernel's own UFS driver takes the controller after a self-test against the loader's reads (kernel PR 155, hakios-starlte PR 33), writes fenced to USERDATA, /private/var on an HFS+ volume in USERDATA made once from TWRP.", "ufs=2: block I/O through the loader and the UEFI's block service, ufs=3's fallback."]
 procedure = ["ufs=3: references read through the loader, the controller taken as UEFI left it, every unit's head, GPTs and partition blocks compared byte for byte, writes fenced by a whitelist, then the switch; any failure falls back to ufs=2."]
 findings = ["Loader-backed UFS reads and writes carry the root and a persistent /private/var.", "ufs=3 on the phone: the self-test and the fence test (68 writes judged, none sent) passed and the kernel switched to native reads (read only); some runs fell back to ufs=2 after a read failed past the switch, which the branch's later commits address."]
-completion = ["iOS mounts its system from SYSTEM and keeps /private/var in USERDATA across boots.", "ufs=3: native reads for the whole run with no fallback, then fenced native writes to USERDATA."]
-limits = ["Native UFS writes (ufs=3 without ufs_native_ro) are not yet evidenced on the phone; ufs=3 is on a PR branch, not main."]
-next_action = ["Repeat ufs=3 runs at the PR branch head until a full run stays native, then enable fenced writes."]
+completion = ["iOS mounts its system from SYSTEM through the kernel's own driver and keeps /private/var in USERDATA across boots."]
+limits = ["The controller is taken as UEFI left it (never reset); the loader keeps core 0 to serve ufs=2's fallback."]
+next_action = ["Keep the self-test's fallback count at zero across daily runs; a reset of the controller of the kernel's own."]
+
+[[area.evidence]]
+kind = "source"
+reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/bd924a364fc559c0bc36c458db7e1c94c095d187"
+result = "ufs=3 merged (kernel PR 155): the kernel's own UFS driver after a self-test against the loader's reads, writes fenced to USERDATA."
 
 [[area.evidence]]
 kind = "device"
@@ -152,12 +157,17 @@ status = "device-verified"
 components = []
 paths = ["GPU.md"]
 inputs = ["Samsung S6E3HA8 AMOLED, 1440 x 2960, on DSIM0; DECON with DPP channel VGF0 (hardware scaler)."]
-configuration = ["fb_dpp=1: three 1125 x 2436 buffers at 0xD4000000 scaled by VGF0 to the panel; panel=1 backlight=2 brightness_bridge=1 for brightness."]
+configuration = ["fb_dpp=1 fb_zc=1, defaults: VGF0 scales to the panel the window server's own surface, made in fb_zc's pool (0xDEC00000-0xE18FFFFF), with nothing copied (kernel PR 160); the scan-out buffers at 0xD4000000 otherwise; panel=1 backlight=2 brightness_bridge=1 for brightness, defaults."]
 procedure = ["UEFI's GOP framebuffer at 0xCC000000 at boot; fb_dpp takes the DPP's VGF0 and flips frames at the DECON's refresh (drivers/gpu/hakios.exynos_dpu.c)."]
 findings = ["The S6E3HA8 has no DCS brightness command; brightness is set by gamma and AOR through DSIM0.", "iOS 16.5's Control Center slider needed to be made operative and its value read from the slider."]
 completion = ["iOS's frames scaled to the full panel by the DPP; the brightness slider changes the panel's brightness."]
 limits = ["No DSIM/DECON bring-up of its own: the controller is used as UEFI leaves it."]
 next_action = ["Measure frame pacing (fps_log) and remove late frames."]
+
+[[area.evidence]]
+kind = "source"
+reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/7059832d7546ead6240779b45660a28db9abd5b5"
+result = "fb_zc and mali_gov merged (kernel PR 160): the window server's surface scanned out with nothing copied, the GPU's clock after its load."
 
 [[area.evidence]]
 kind = "device"
@@ -215,41 +225,53 @@ revision = "402471149a39a4ebc6f260ec2f0b6ffa8f1ff503"
 
 [[area]]
 id = "network"
-status = "implemented"
+status = "device-verified"
 components = []
 paths = ["WIFI.md", "BLUETOOTH.md", "firmware/wifi/*", "firmware/bt/*"]
-inputs = ["Broadcom BCM4361 (Murata/SEMCO module) on PCIe channel 0; firmware, NVRAM and CLM from the phone's own VENDOR partition (not in this repository on main).", "Bluetooth on UART_BT with BT_EN on the PCAL6524 expander."]
-configuration = ["wifi_pcie=6 (PCIe stage 1); brcmfmac=7 (Linux's brcmfmac through the kernel's Linux compatibility layer); bt=N for Bluetooth."]
-procedure = ["Stage 1: PMU isolation, PERST#, WLAN_REG_ON, PHY PLL, root complex, LTSSM, link. Stage 2: brcmfmac probe, chip ID and OTP module ID, firmware and NVRAM into the chip's RAM, interrupt, command interface."]
-findings = ["On the phone the PCIe link comes up (Gen1 x1), the chip reads as 4361 revision 5, and the firmware and NVRAM load and start; brcmfmac does not yet reach its command interface."]
-completion = ["The firmware's command path answers, the interface comes up and a WPA2 network is joined."]
-limits = ["No working network yet; Bluetooth is written and not yet seen; the PR branches (kernel PR 157, hakios-starlte PR 34) are not merged."]
-next_action = ["Read the firmware's console after the start and find why the command ring gets no answer."]
+inputs = ["Broadcom BCM4361 (Murata/SEMCO module) on PCIe channel 0; firmware, NVRAM and CLM from firmware/wifi or the phone's own VENDOR partition.", "Bluetooth on UART_BT with BT_EN on the PCAL6524 expander."]
+configuration = ["wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1, all defaults (Linux's brcmfmac through the kernel's Linux compatibility layer, the station for iOS's Apple80211); bt=N for Bluetooth, not a default."]
+procedure = ["Stage 1: PMU isolation, PERST#, WLAN_REG_ON, PHY PLL, root complex, LTSSM, link. Stage 2: brcmfmac probe, chip ID and OTP module ID, firmware and NVRAM into the chip's RAM, interrupt, command interface, the phone's address, the station, joining (WPA2 by the kernel's lx_wpa.c); configd's DHCP on en0."]
+findings = ["On the phone the link comes up (Gen1 x1), the chip reads as 4361 revision 5, the firmware runs, a scan hears the access points, and a WPA2 network is joined from iOS's Settings, with an address from DHCP and the Internet answering."]
+completion = ["Wi-Fi joined from iOS's Settings, DHCP and the Internet: done."]
+limits = ["Bluetooth is written and not yet seen; no host stack."]
+next_action = ["Bluetooth's first runs (bt=1..6, BLUETOOTH.md)."]
 
 [[area.evidence]]
 kind = "device"
-reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/f9eb2a69fe2ddad173a3f8d3e306f4db3f9cd92a"
-result = "Device run, 2 November 2026 (PR branch s9/wifi-vendor-fw): LINK UP Gen1 x1, chip 4361 rev 5, firmware and NVRAM loaded and the chip's processor started; brcmfmac did not reach its interface. The capture is kept privately (it holds iOS's own log lines); this entry describes it."
-command = "USB console capture: the phone's CDC-ACM port (1209:0001, usb_gadget=5) read on the host with a serial terminal, the run's boot-args and kernel log recorded; boot-args: cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1 wifi_pcie=6 brcmfmac=7"
-revision = "f9eb2a69fe2ddad173a3f8d3e306f4db3f9cd92a"
-
-[[area]]
-id = "audio"
-status = "implemented"
-components = []
-paths = ["AUDIO.md", "firmware/audio/*"]
-inputs = ["ABOX audio subsystem; two MAX98512 amplifiers on I2C; Cirrus CS47L92 codec."]
-configuration = ["abox=N (8 steps, ABOX's CPU off: RDMA0 -> SIFS0 -> UAIF1, I2S 48 kHz 2 x 16 bits); max98512=N (3 steps)."]
-procedure = ["Bring up the ABOX route, play a tone, then hand iOS's output and volume to it."]
-findings = ["Written from the BSP's facts; not yet heard on the phone."]
-completion = ["A tone, then iOS's sound, from the speaker."]
-limits = ["Not run on the phone."]
-next_action = ["First phone run with abox=1, stepping up while logging each step."]
+reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/f4a0b823f2f852ab237fac9daa621a8853cfa061"
+result = "Device runs wifi-d1 to wifi-d4, 3 November 2026 (kernel PR 157, merged): WPA2 joined, configd's DHCP, the gateway and the Internet answering the console's wifi ping; then iOS's Settings join. The captures are kept privately (they hold iOS's own log lines); this entry describes them."
+command = "USB console capture: the phone's CDC-ACM port (1209:0001, usb_gadget=5) read on the host with a serial terminal, the run's boot-args and kernel log recorded; boot-args: cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1 ufs=3 wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1"
+revision = "f4a0b823f2f852ab237fac9daa621a8853cfa061"
 
 [[area.evidence]]
 kind = "source"
-reference = "https://github.com/Scion-Project/hakios-starlte/blob/cf33958052eea2d50f0d6f8225ada7b8b3f2d9b8/AUDIO.md"
-result = "The audio plan and the driver's steps."
+reference = "https://github.com/Scion-Project/hakios-starlte/blob/57d00d3392ecefaddd6cecdff7617e07739d89a0/WIFI.md"
+result = "Every Wi-Fi run on the phone and what each showed (stages a to e)."
+
+[[area]]
+id = "audio"
+status = "device-verified"
+components = []
+paths = ["AUDIO.md", "firmware/audio/*"]
+inputs = ["ABOX audio subsystem; two MAX98512 amplifiers on I2C; Cirrus CS47L93 codec on SPI (headphones, microphones)."]
+configuration = ["abox=8 max98512=3, defaults (ABOX's CPU off: RDMA0 -> SIFS1 -> UAIF1, I2S 48 kHz 2 x 16 bits; the amplifiers on and off with UAIF1)."]
+procedure = ["Bring up the ABOX route, play a tone (abox=7), then hand iOS's output and volume to it (abox=8)."]
+findings = ["ABOX's DMA runs without its firmware at 192000 bytes a second; a 1 kHz tone and iOS's own sounds play through both amplifiers (frames from iOS, none lost)."]
+completion = ["A tone, then iOS's sound, from the speakers: done."]
+limits = ["The proof is the DMA's rate, the guard's peaks and the amplifiers' registers; the headphones and microphones (CS47L93) are not started."]
+next_action = ["The CS47L93 on SPI for the microphones and headphones (AUDIO.md, What is left)."]
+
+[[area.evidence]]
+kind = "device"
+reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/dc5fbb431909904560cc13f0dac3801143f6434c"
+result = "Device runs a1-b3, 3 November 2026, phone 2 (kernel PR 163, merged): the tone and iOS's sounds through ABOX and both MAX98512s. The captures are kept privately (they hold iOS's own log lines); this entry describes them."
+command = "USB console capture: the phone's CDC-ACM port (1209:0001, usb_gadget=5) read on the host with a serial terminal, the run's boot-args and kernel log recorded; boot-args: cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1 ufs=3 abox=8 max98512=3"
+revision = "dc5fbb431909904560cc13f0dac3801143f6434c"
+
+[[area.evidence]]
+kind = "source"
+reference = "https://github.com/Scion-Project/hakios-starlte/blob/e600c8216ec8b43a0c7bd2f4982ac77ef2ce5e3b/AUDIO.md"
+result = "The audio driver's steps, the runs and how to hear them."
 
 [[area]]
 id = "power"
@@ -257,12 +279,12 @@ status = "device-verified"
 components = []
 paths = ["device.conf"]
 inputs = ["MAX77705 (fuel gauge 0x36, charger, haptic block, MUIC USB switch); S2MPS18 PMIC with RTC; ACPM DVFS; Exynos 9810 TMU."]
-configuration = ["max77705=1, max77705_haptic=1, max77705_usbsw=1; cpufreq_lit/cpufreq_big; cpufreq_gov=1; tmu=3; rtc_pmic=1."]
+configuration = ["max77705=1, max77705_haptic=1, max77705_usbsw=1; cpufreq_gov=1 (its touch and frame boosts); tmu=3; rtc_pmic=1: all defaults. cpufreq_lit/cpufreq_big fix the rates when the governor is off."]
 procedure = ["The governor moves both clusters' rates through ACPM's DVFS within Samsung's limits, and slows them from the TMU's temperatures (83 C big, 76 C little)."]
 findings = ["The APM reports 0 for the CPU rates, so the governor runs on the rate it asked for; its temperatures come from the TMU driver itself.", "The battery level and charger state reach iOS; haptics are felt; the RTC read gives the time of day."]
 completion = ["Battery, haptics, DVFS with thermal throttling and the RTC working under iOS."]
 limits = ["Read-only PMIC/charger access; no suspend; the GPU is not throttled."]
-next_action = ["Merge the governor's touch and frame boosts (kernel PR 158) and confirm them on the phone."]
+next_action = ["Throttle the GPU from the TMU's G3D zone."]
 
 [[area.evidence]]
 kind = "device"
@@ -334,21 +356,28 @@ revision = "9f9d8927733e4b53a45927a7b83973b97612d8f5"
 
 [[area]]
 id = "camera"
-status = "implemented"
+status = "device-verified"
 components = []
 paths = ["CAMERA.md"]
 inputs = ["Front S5K3H1 sensor: supplies on the S2MPB02, MCLK, I2C; ISPPRE domain, CSIS1 and its D-PHY, VC0's DMA."]
-configuration = ["cam_s9=1..6 (6: camshot, a debayered frame over the USB console); the frame at 0xD8000000."]
-procedure = ["Supplies and model ID, then the domain, the CSIS test pattern, one sensor frame in RAW10 1632 x 1224, then camshot."]
-findings = ["Written from the BSP's facts; phone runs in progress."]
-completion = ["A sensor frame captured and sent over the USB console."]
-limits = ["No ISP firmware; rear cameras not started."]
-next_action = ["Phone runs cam_s9=1 upward, one step at a time."]
+configuration = ["cam_s9=7 cam=5, defaults: the sensor streaming into a ring of four frames at 0xD8000000, /dev/hakios-camera, and iOS's camera stack through libhakios.media."]
+procedure = ["Supplies and model ID, then the domain, the CSIS test pattern, one sensor frame in RAW10 1632 x 1224, camshot, then streaming at 30 frames a second."]
+findings = ["The front camera auto-exposed, demosaiced at 1632 x 1224, streams at 30 frames a second into the stock Camera app's preview."]
+completion = ["The stock Camera app shows the front camera: done."]
+limits = ["No ISP firmware (the processing is the kernel's and user space's own); rear cameras not started."]
+next_action = ["The rear cameras (CAMERA.md)."]
+
+[[area.evidence]]
+kind = "device"
+reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/b0a0d91a8decfed727631d111e3be34762baab94"
+result = "Device run cn3-7, 3 November 2026 (kernel PR 162, merged): the front camera streaming at 30 frames a second into the stock Camera app's preview. The capture is kept privately (it holds iOS's own log lines); this entry describes it."
+command = "USB console capture: the phone's CDC-ACM port (1209:0001, usb_gadget=5) read on the host with a serial terminal, the run's boot-args and kernel log recorded; boot-args: cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1 ufs=2 cam_s9=7 cam=5"
+revision = "b0a0d91a8decfed727631d111e3be34762baab94"
 
 [[area.evidence]]
 kind = "source"
-reference = "https://github.com/Scion-Project/hackios-xnu-kernel/commit/f1bdb354814ab91c7db1e7e61afa9d09715fd71f"
-result = "camshot and stages 1-3 of the front camera driver."
+reference = "https://github.com/Scion-Project/hakios-starlte/blob/a4ca1f72f5c005c03a4e7865aa1a20d4cb0a6907/CAMERA.md"
+result = "The camera's hardware, its steps and how iOS's camera stack is fed."
 
 [[area]]
 id = "modem"
