@@ -28,11 +28,12 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
   CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
 
 Seen working but not a default, for want of room on the line (Defaults): the sensors, the hub in the BCM4775 read at
-50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md).
+50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md); Bluetooth, the chip patched
+at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH.md).
 
 Not working yet: the headphones and the recording reaching iOS (the CS47L93 codec's main microphone records), Bluetooth
-(BLUETOOTH.md: the chip's HCI written, no host stack), the modem (docs/modem-plan.md), the rear cameras, the seventh core
-(core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
+in iOS (`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras, the
+seventh core (core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -248,8 +249,9 @@ about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`
 own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
 A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
 `device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
-SENSORS.md) have been seen working but do not fit (432 + 7 is over the 437 the line leaves): give `shub=6` to
-`mkimage.sh` (or the installer) for a run with them.
+SENSORS.md) and Bluetooth (`bt=7`, BLUETOOTH.md) have been seen working but are not defaults: `shub=6` does not fit
+(432 + 7 is over the 437 the line leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the
+installer) for a run with them.
 
 ## On the phone
 
@@ -831,7 +833,7 @@ bootcpu=2` in each, as the column below leaves them out), or without `-n` to try
 | 14 | `tmu=2` | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell (the big zone is the M3s', which cannot be started yet: The cores, above) |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
 | 16 | `mali=1` up to `mali=9`, one step a run | "PLL_G3D as found: ... 260.000 MHz" and "B6OUT ... mV"; then "BUCK6 (vdd_g3d) now: ... 0x68 = 950 mV", "the domain is on", "SMC 0x82000410 returned 0", "GPU_ID 0x6...", "reset", "all powered", "the GPU ran it" twice ([The GPU](#the-gpu)) |
-| 17 | `bt=1` up to `bt=6`, one step a run (6 takes the patch from `fw/` or the phone's VENDOR; with `wifi_pcie=6 brcmfmac=2` the module is read from the chip's OTP) | "UART_BT's clock ... (ratio 2: 200 MHz", the expander's ports and BT_EN, "loopback: all 16 bytes came back", "the chip powered", "manufacturer 000f (Broadcom)", then the patch and the version after it ([BLUETOOTH.md](BLUETOOTH.md)) |
+| 17 | `bt=7 bt_scan=1 wifi_pcie=6 brcmfmac=8 ...` (the patch from the phone's VENDOR, the module from the chip's OTP); then `bt` and `bt scan` on the USB console | "loopback: all 16 bytes came back", "manufacturer 000f (Broadcom)", the patch and "build 232" after it, "at 4000000 baud ... Read Local Version answers", the scan's devices ([BLUETOOTH.md](BLUETOOTH.md)) |
 | 18 | `usb_gadget=1` | "usb: exynos9810: PMU USB PHY ...", "CMU_TOP CLKCMU_FSYS0_USB30DRD: ... gate ..." (if SHUT, the next runs add `usb_gadget_clk=1`), "LDO9-14 CTRL: ...", "USBCON as the boot left it", "DWC3 as the boot left it: GSNPSID 5533...", DCTL's RUN_STOP |
 | 19 | `usb_gadget=2` | "2a: PMU +0x72C ... -> ...1" to "2l: COMBO_PMA_CTRL ...", none "(NOT as written)"; "USBCON after: ... (SIDDQ 0, line ...)" |
 | 20 | `usb_gadget=3` | "3: reset done in N us", "DWC3 set up: ... DCTL ... event buffer ..."; "did not finish in 500 ms" means the PHY gives the link no clock |
@@ -859,7 +861,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 |---|---|
 | Speaker audio | plays (runs 10-12); to hear it, and the speakers' order (top/bottom, left/right) by ear; the mixer's way (SIFS0) and the amplifiers' current/voltage sense back over UAIF1 for a measured proof ([AUDIO.md](AUDIO.md)) |
 | Headphones, microphones | the CS47L93 records its main microphone (`cs47l93=6`); next OUT2 and Cirrus's headphone sequence, the jack's microphone, and the recording to iOS (an input side for `/dev/hakios-audio`) ([AUDIO.md](AUDIO.md), "The codec") |
-| Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
+| Bluetooth | on the phone (3 November): the chip powered and patched, 4 Mbaud, an inquiry and an LE scan from the USB console (`bt=7`, given for a run, not a default; `bt scan`); for iOS, `/dev/cu.bluetooth` and the address `bluetoothd` needs are there and it stays up, waiting on BlueTool's boot ([BLUETOOTH.md](BLUETOOTH.md)) |
 | Wi-Fi | works (joined from Settings, DHCP, the Internet); next: roaming, power saving ([WIFI.md](WIFI.md)) |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
 | Storage, writing | /private/var kept in USERDATA works (above); next an image with ReportCrash allowed for crash reports |

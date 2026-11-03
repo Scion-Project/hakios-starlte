@@ -8,7 +8,7 @@ schema_version = 1
 name = "starlte"
 soc = "Exynos 9810"
 os_profile = "ios-16.5-20F66"
-summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s, the CS47L93 codec's main microphone recorded through ABOX. Seen working but not a default (no room on the line): the sensor hub's six sensors and iOS's orientation and proximity (shub=6, SENSORS.md). Not yet: headphones and the recording reaching iOS, Bluetooth, modem, rear cameras, core 1, the low RAM bank."
+summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s, the CS47L93 codec's main microphone recorded through ABOX. Seen working but not a default (no room on the line): the sensor hub's six sensors and iOS's orientation and proximity (shub=6, SENSORS.md); Bluetooth patched at 4 Mbaud with an LE scan from the USB console (bt=7, BLUETOOTH.md). Not yet: headphones and the recording reaching iOS, Bluetooth in iOS, modem, rear cameras, core 1, the low RAM bank."
 
 [[area]]
 id = "upstream"
@@ -35,7 +35,7 @@ procedure = ["tools/hakios-device.py sync starlte in the kernel tree, then make 
 findings = ["Each driver goes up in logged steps (driver=N) so a first phone run is safe; device.conf records each subsystem as seen on the phone, or written and not yet seen. Diagnostics (fps_log, systrace, *_probe, *_log) are never defaults."]
 completion = ["The kernel builds with starlte_defconfig and the image boots iOS 16.5 on the phone (see firmware and cpu)."]
 limits = ["The kernel's command line holds 607 characters: the defaults take 422 and a run about 155 more (CONFIG_CMDLINE_RUN), so a run's added diagnostics have about 30 left; mkimage.sh warns past that."]
-next_action = ["Add each driver to the defaults once it is seen working on the phone (Bluetooth, the torch, the headphones)."]
+next_action = ["Add each driver to the defaults once it is seen working on the phone (the torch, the headphones; the sensors and Bluetooth once the line has room)."]
 
 [[area.evidence]]
 kind = "source"
@@ -229,12 +229,12 @@ status = "device-verified"
 components = []
 paths = ["WIFI.md", "BLUETOOTH.md", "firmware/wifi/*", "firmware/bt/*"]
 inputs = ["Broadcom BCM4361 (Murata/SEMCO module) on PCIe channel 0; firmware, NVRAM and CLM from firmware/wifi or the phone's own VENDOR partition.", "Bluetooth on UART_BT with BT_EN on the PCAL6524 expander."]
-configuration = ["wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1, all defaults (Linux's brcmfmac through the kernel's Linux compatibility layer, the station for iOS's Apple80211); bt=N for Bluetooth, not a default."]
+configuration = ["wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1, all defaults (Linux's brcmfmac through the kernel's Linux compatibility layer, the station for iOS's Apple80211); bt=7 for Bluetooth, not a default (it would take the line's last 5 characters)."]
 procedure = ["Stage 1: PMU isolation, PERST#, WLAN_REG_ON, PHY PLL, root complex, LTSSM, link. Stage 2: brcmfmac probe, chip ID and OTP module ID, firmware and NVRAM into the chip's RAM, interrupt, command interface, the phone's address, the station, joining (WPA2 by the kernel's lx_wpa.c); configd's DHCP on en0."]
 findings = ["On the phone the link comes up (Gen1 x1), the chip reads as 4361 revision 5, the firmware runs, a scan hears the access points, and a WPA2 network is joined from iOS's Settings, with an address from DHCP and the Internet answering."]
 completion = ["Wi-Fi joined from iOS's Settings, DHCP and the Internet: done."]
-limits = ["Bluetooth is written and not yet seen; no host stack."]
-next_action = ["Bluetooth's first runs (bt=1..6, BLUETOOTH.md)."]
+limits = ["Bluetooth: the chip patched at 4 Mbaud and an LE scan from the USB console (bt=7, phone 2, 3 November); in iOS, bluetoothd waits on BlueTool's boot."]
+next_action = ["BlueTool's boot for iOS's bluetoothd (BLUETOOTH.md, iOS)."]
 
 [[area.evidence]]
 kind = "device"
