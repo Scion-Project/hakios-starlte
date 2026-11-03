@@ -160,6 +160,60 @@ others' INT_SRC" say whether the generator fed another CSIS's DMA. If C5 gives "
 the settle is the suspect. If C6's picture has the right shapes and the wrong colours, try `cam_s9_bayer=` 0, 2 or 3;
 if it is sheared, `cam_s9_stride=` (the "bytes written" over 1224); a "camshot failed" line names the registers to read.
 
+## The iris camera
+
+`drivers/camera/hakios.exynos_iris.c` (`iris_s9=N`, CONFIG_HAKIOS_EXYNOS_IRIS; off unless asked). Written, not yet seen.
+Its head has every register and number and where each comes from (the BSP's fimc-is-device-module-5f1.c,
+leds-s2mpb02.c, the device tree; GPL, read for facts only).
+
+| | The iris camera |
+|---|---|
+| Sensor | Samsung S5K5F1, infrared, 2400 x 2400 RAW8 at 30 fps, `fimc-is-secure@10`, position 3 |
+| I2C | 0x10 on hsi2c@108D0000 (USI07_I2C of PERIC1, pins gpp4-6/7, function 3), 400 kHz |
+| Reset, enable | gpg2-3; `gpio_iris_en` gpg0-7, high while powered |
+| MCLK | CIS_CLK2 (CMU_TOP 0x1020/0x181C/0x2020/0x300C), 26 MHz from OSCCLK, out on gpc1-6 function 2 |
+| Supplies | the S2MPS18 through ACPM: LDO39 VDDD 1.05 V, LDO40 VDDA 2.8 V, LDO41 VDDIO 1.8 V |
+| MIPI | CSIS3 (0x16260000), two lanes at 2041 Mb/s (deskew on, settle 10), VC0's WDMA at 0x162E0000 in packet mode |
+| IR LED | the S2MPB02's FLED2 in its infrared mode, strobed by the sensor once a frame |
+
+The IR LED, and eye safety. The driver never lights the LED itself and never uses FLED2's torch mode. Before each
+capture it sets the seven LED registers to the only values Samsung's GPL kernel holds (FLED_CTRL2 0x38, CUR2 0xAF,
+IRON1 0x19, IRON2 0x0B, IRD1 0x00, IRD2 0x2E, and TIME2's IR max timer on) and reads each back; if one does not read
+back, the sensor is not started. The per-shot current and pulse values of Samsung's iris HAL are not open and are not
+used. The sensor streams only inside one capture: at most `iris_s9_ms` (600 ms unless said, at most 2 s), stopped on
+every way out (a failed step, the run's end, a panic). Captures are at least 2 s apart, and a run makes at most 40.
+
+The iris camera shares the S2MPB02's bus and the ISPPRE domain with the front camera and the flashlight, and the I2C
+helper is one driver per bus: `iris_s9=N` runs only without `cam_s9=` and `torch=` (the S9's default `cam_s9=7` must be
+taken out with `cam_s9=`). Running both is the next step: one owner of the S2MPB02 and of ISPPRE.
+
+| Run | Arguments | What to look for |
+|---|---|---|
+| I1 | `cam_s9= iris_s9=1` | CIS_CLK2's registers, the pins, the three LDOs through ACPM ("VDDD_1.05V_IRIS (LDO39): 0x.."), "S2MPB02 ID ..; FLED CTRL1 .. CTRL2 .. CUR2 .. TIME2 .. IRON1 .. IRON2 .. IRD1 .. IRD2 .." |
+| I2 | `cam_s9= iris_s9=2` | the LDOs "on (0xec)", "(0xe8)", "(0xdc)"; "the sensor: model ID 5f1., version 0xa1"; the OTP's "test 1 1 1"; "powered down ... off as found" |
+| I3 | `cam_s9= iris_s9=3` | after I2's, the FLED registers again: CTRL2 0x38, CUR2 0xaf, TIME2 bit 0, IRON1 0x19, IRON2 0xb, IRD1 0, IRD2 0x2e |
+| I4 | `cam_s9= iris_s9=4` | "read back: output 2400 x 2400, frame 5079 lines of 2616 clocks"; "CSIS3 version 0x..."; "STREAM ON"; "streamed N ms; a whole frame"; "the frame: about 5760000 of 5760000 bytes changed"; the middle patch's mean (an eye or a hand at 25-35 cm: well above black) |
+| I5 | `cam_s9= iris_s9=5 usb_gadget=5` | after I4's, "5: ready for the USB console's irshot"; on the host `tools/usb-shot.py --iris -o iris.png`: a grey 1200 x 1200 infrared picture |
+
+If I2 says the sensor does not answer, the LDOs' read-back and `look_pins` say which part of the power-up is missing.
+If I4 has no frame end, the CSIS's INT_SRC0 says whether the link saw start-of-transmission (SOT) or CRC errors (the
+settle, the deskew) or nothing at all (the lanes, the D-PHY's reset bit 3); `iris_s9_ispdiv=1` halves the bus clock.
+
+### Towards Face ID
+
+iOS 16.5's Face ID (the image is an iPhone X's) runs `biometrickitd` with `/usr/lib/libBKDM2.dylib`, which drives
+`ApplePearlSEPDriver` (the Secure Enclave's biometric service) and `AppleH10CamIn`'s Pearl streams (the dot projector, the
+flood illuminator and the IR camera, read by the SEP). This port has no SEP: its keystore stand-in
+(`MiniAppleKeyStore.cpp`) answers "no passcode, unlocked" and has no passcode at all. The plan, in order:
+1. this driver: an infrared frame of an eye, and a stream to user space (`/dev/hakios-iris`, not written yet);
+2. a passcode in the keystore stand-in (set, change, lock, unlock against a salted verifier kept in /private/var), and
+   the credential coreauthd asks for when Face ID is enrolled;
+3. a process of our own serving `com.apple.pearld` (BiometricKit's XPC protocol: enrol, match, identities, state) with
+   an on-device iris matcher (open-iris, MIT; its segmentation model MIT/Apache-2.0), and a keystore call that unlocks
+   on a match.
+What stays fake: with no SEP there is no hardware key, so the passcode and Face ID gate the screen, not the data; any
+root process could unlock; the templates are a root-only file; there is no anti-spoofing beyond the IR picture itself.
+
 ## Stock iOS's camera, and how ours is presented to it
 
 Research from public sources (Apple's open-source XNU and IOKit headers, The Apple Wiki, Asahi Linux's documentation
