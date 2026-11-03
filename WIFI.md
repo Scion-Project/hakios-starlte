@@ -142,7 +142,14 @@ The kernel has the driver only if `tools/mk-brcmfmac.sh` ran before it was built
   country.
 - 8: `associated` and then `the handshake did not finish`: no EAPOL frame came up (`0 messages`) means the firmware
   passes them elsewhere; `NOT GOOD: the MIC ...` means a wrong passphrase. `the association is refused` with a status
-  code: our RSN element against the access point's (`lx_rsn.h`).
+  code: our RSN element against the access point's (`lx_rsn.h`). The access point's message 1 again and again, each
+  answered (`answered with ours (message 2)`), then `the network is gone (reason 15)`: message 2 did not reach it, or
+  its MIC was wrong. Before the first means `failed to expand headroom` (fixed: lx-tx.patch); `lx: msgbuf: frame N on
+  flow ring 0: status 0` says the firmware sent it. Then the MIC: the passphrase, or our own address (the network
+  device's `registered (00:00:00:..)` was the address left zero, fixed in lx_prelude.h).
+- e: `usb: wifi ip: en0's link is up; no IPv4 address yet`: configd's DHCP (`net_test: wifi:` says whether configd has
+  its own service for en0); `wifi ping` with no answer: the gateway's address (`wifi ip`), or frames that do not come
+  up (`the network is left: N frames sent, M received`).
 
 ### What remains
 
@@ -241,7 +248,31 @@ failed`: no ioctl response buffer had been posted, as brcmfmac's control buffers
 `lx: the interface wlan%d is up`, the station offered. wifi-a8: the USB console's `wifi scan` ran brcmfmac's escan, but no
 event reached it (`brcmf_escan_timeout: timer expired`): `eth_type_trans()` left the MAC header where brcmfmac looks
 for the event. wifi-a9: stage c, `lx: a scan for the kernel: 0 channels named (0: all), asking: 0; 7 access points heard
-in 2306 ms`, on 2.4 and 5 GHz, listed by the USB console's `wifi scan`. Next: stage d (`brcmfmac=8`).
+in 2306 ms`, on 2.4 and 5 GHz, listed by the USB console's `wifi scan`.
+
+Stages d and e (3 Nov, phone 2, a private image with `fw/network` in its ramdisk, `brcmfmac=8 wifi=1`, a WPA2-PSK
+network on 5 GHz): wifi-d1 associated (`lx: associated, 222 ms after brcmfmac's connect`), and the access point's message
+1 came up, but each message 2 was dropped by brcmfmac (`brcmf_netdev_start_xmit: wlan0: failed to expand headroom`:
+LinuxKPI's `skb_header_cloned()` says yes of every buffer and its `pskb_expand_head()` fails; lx-tx.patch). wifi-d3:
+message 2 sent (`flow ring 0 made: status 0`, `frame 2 on flow ring 0: status 0`), message 1 again three times, then
+reason 15: the MIC. LinuxKPI's `eth_hw_addr_set()` does nothing, so the network device's address, which lx_wpa.c takes
+as ours, was zero (`registered (00:00:00:..)`, with `wifi_mac=` too). wifi-d4, with it set:
+
+    lx: the network device wlan0 is registered (08:c5:e1:..:..:..)
+    lx: the handshake: a message of 99 bytes from the access point: its first; answered with ours (message 2)
+    lx: the handshake: a message of 155 bytes from the access point: its second, SIGNED WITH THE KEY WE HAVE TOO, and with the group's key; answered (message 4)
+    lx: the handshake: both keys given to the firmware: 0
+    lx: THE NETWORK IS JOINED, 166 ms after brcmfmac's connect: frames pass
+    brcmfmac: 8: THE NETWORK OF FW/NETWORK IS JOINED (0, 0)
+    net_test: wifi: configd has a network service for en0 after 6.4 s: it configures it itself
+    usb: wifi ip: en0's link is up; address 192.168.0.101, mask 255.255.255.0; the default route's gateway 192.168.0.1 on en0
+    usb: wifi ping 192.168.0.1: 4 of 4 answered            (4.2 to 6.0 ms)
+    usb: wifi ping 1.1.1.1: 4 of 4 answered                (14 to 17 ms)
+
+DHCP is configd's, on the "Wi-Fi" service it makes of the radio's registry objects (`hakios.wlan.cpp`); wifid takes the
+link up. The USB console's `wifi ip` and `wifi ping [A.B.C.D]` (the kernel's, `drivers/net/hakios.net.c`) say what en0 was
+given and whether the network answers. Next: stage f, Settings (the screen of these runs stayed at the boot logo:
+the run's display, not the radio's doing, to be seen with the daily image's ramdisk).
 
 Sources: the S9's kernel at e5906667068e (`drivers/pci/host/pci-exynos*.c` and `pci-exynos.h`: ELBI's interrupt
 registers, `exynos_pcie_enable_interrupts()`, `exynos_pcie_irq_handler()`;
