@@ -27,9 +27,12 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 - the speakers through ABOX and the two MAX98512s, iOS's own sounds (`abox=8 max98512=3`; AUDIO.md); the codec, a
   CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
 
-Not working yet: the headphones and the recording reaching iOS (the CS47L93 codec's main microphone records), Bluetooth (BLUETOOTH.md: the chip's HCI written,
-no host stack), the sensors (the sensor hub), the modem (docs/modem-plan.md), the rear cameras, the seventh core (core 1,
-which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
+Seen working but not a default, for want of room on the line (Defaults): the sensors, the hub in the BCM4775 read at
+50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md).
+
+Not working yet: the headphones and the recording reaching iOS (the CS47L93 codec's main microphone records), Bluetooth
+(BLUETOOTH.md: the chip's HCI written, no host stack), the modem (docs/modem-plan.md), the rear cameras, the seventh core
+(core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -244,7 +247,9 @@ arguments are given for a run. The defaults take 432 characters of the 607 the k
 about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`, `-v`), which leaves some 20 for a run's
 own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
 A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
-`device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it.
+`device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
+SENSORS.md) have been seen working but do not fit (432 + 7 is over the 437 the line leaves): give `shub=6` to
+`mkimage.sh` (or the installer) for a run with them.
 
 ## On the phone
 
@@ -861,4 +866,5 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
 | The seventh core | core 1, which S-Boot parks before the hand-over (The cores): not reached yet |
 | The low RAM bank | XNU has the 2 GB bank from 0x880000000; the 2 GB bank below 4 GB (less its reserved ranges and the carve-outs, Memory layout) is not given to it |
-| Sensors, the modem, the rear cameras | the sensor hub, the Shannon CP ([docs/modem-plan.md](docs/modem-plan.md)) and the rear cameras are not started |
+| Sensors | the hub reads six sensors and iOS takes orientation and proximity (`shub=6`, [SENSORS.md](SENSORS.md)); a default once the line has room; the gyroscope's and magnetometer's units, auto-brightness |
+| The modem, the rear cameras | the Shannon CP ([docs/modem-plan.md](docs/modem-plan.md)) and the rear cameras are not started |
