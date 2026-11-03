@@ -111,7 +111,7 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
 | **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |
 | **0xF9200000-0xFB1FFFFF** | **`cp_ram_logging`** | DT |
-| **0xFB200000-0xFD9FFFFF** | **`abox_rmem`** (calliope's; our ABOX driver runs without it and does not use it) | DT |
+| **0xFB200000-0xFD9FFFFF** | **`abox_rmem`** (calliope's; calliope does not run here: the ABOX driver puts its 256 KB ring at its start, the kernel's own RAM being above 4 GB) | DT |
 | 0xFDA00000-0xFF607FFF | `exynos_ss`: its header 0xFDA00000, `log_kernel` 0xFDA10000 (the kernel's log for TWRP with `esslog=1`), ..., `log_pstore` 0xFED10000 + 32 KB (the loader's RAM log and ramoops' record; reserved in UEFI) | DT, UEFI |
 | 0xFF800000 + 8 MB | `fimc_is_lib`, no-map | DT |
 | 0x880000000 + 2 GB | XNU's RAM: the largest free block (`physBase`, `memSize`); in it the kernel at +48 MB, the ramdisk after it, the device tree (64 KB) and `boot_args` after that | L `choose_window`, `run_kernel` |
@@ -608,11 +608,16 @@ Apple80211 surface, as on the POCO; nothing in user space changes (WIFI.md, "iOS
 ## Speaker audio
 
 Two drivers, both built in and off until asked: `abox=N` (`drivers/audio/hakios.exynos_abox.c`, 8 steps) is the SoC's
-side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS0 -> UAIF1, I2S at 48 kHz, 2 x 16 bits; `max98512=N`
+side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS1 -> UAIF1, I2S at 48 kHz, 2 x 16 bits; `max98512=N`
 (`drivers/audio/hakios.max98512.c`, 3 steps) is the two amplifiers on I2C. Step 8 of ABOX makes it the sink of
-`/dev/hakios-audio`, the same way in for iOS's sound as on the POCO, with iOS's volume and mute followed. Whether
-ABOX's DMA runs without its firmware is something Android's source cannot say (Android never tries); what it does say,
-and the runs that will tell, are in [AUDIO.md](AUDIO.md). Written, not yet heard.
+`/dev/hakios-audio`, the same way in for iOS's sound as on the POCO, with iOS's volume and mute followed.
+
+It plays (phone 2, 3 November): ABOX's DMA runs without its firmware at 192000 bytes a second, `abox=7 max98512=3`
+plays a 1 kHz tone through both amplifiers, and with `abox=8 max98512=3` iOS's own sounds come through (frames from iOS,
+none lost, the amplifiers on while they play). Nobody has listened yet: the proof is the DMA's rate, the guard's peaks
+and the amplifiers' registers ([AUDIO.md](AUDIO.md), with how to hear it). Add `abox=8 max98512=3` to an image's
+arguments for sound; `abox` on the USB console says the state and `abox tone 3` plays the tone again (with `abox=7`).
+Headphones and the microphones are the CS47L93 codec's, on SPI: not started.
 
 ## Temperatures
 
@@ -749,9 +754,9 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 8b | `cam_s9=3`, then `4`, then `5`, one a run | "SMC 0x82000410 returned 0" and "MMU_CTRL 0x0"; then "THE PATTERN REACHED MEMORY"; then "frame end 1" and "THE PATCH ...: mean ..." (CAMERA.md's runs C3 to C5) |
 | 8c | `cam_s9=6 usb_gadget=5`, then `tools/usb-shot.py --cam -o cam.png` | "6: CAMSHOT READY"; then "usb: camshot 1 sent" and a picture from the front camera, or "usb: camshot failed: ..." with the CSIS's and the WDMA's registers (CAMERA.md's run C6) |
 | 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
-| 10 | `abox=1` up to `abox=6`, one step a run | "the AUD domain is on", "IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648xxx Hz", "UAIF1_CTRL1 ... reads 0x984f000", the sample banks ([AUDIO.md](AUDIO.md)) |
-| 11 | `max98512=1`, then `max98512=2` | "max98512: top (0x39): MAX98512, revision ..." and the bottom one's; their registers |
-| 12 | `abox=7`, then `abox=7 max98512=3` | "RDMA0 STATUS each ms" moving and about 192000 bytes a second read; then a 1 kHz tone for 3 s |
+| 10 | `abox=6 max98512=2` (run a1, seen) | "ABOX IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648040 Hz", "gpb1-0..3 with UAIF1 on: 1856, 192, 0, 0 changes", "max98512: top (0x39): MAX98512, revision 0x41" and the bottom one's ([AUDIO.md](AUDIO.md)) |
+| 11 | `abox=7 max98512=3` (runs b1, seen) | "ABOX's SysMMU translates (CTRL 0x4) ... switched off", "the ring: 16384 bytes in abox_rmem at 0xfb200000", "192417 bytes a second read", "the guard: peaks in 3277"; `abox tone 3` on the USB console again |
+| 12 | `abox=8 max98512=3` (runs b2, b3, seen) | "abox: 8: iOS plays: starting the amplifiers", "max98512: on: ... (start N, unmuted only, 31054 us)", "from iOS N frames (0 lost)" |
 | 13 | `tmu=1` | "tmu: 1: gate ... open", each block's "CONTROL ... (CORE_EN 1 ...)", every sensor's "TRIMINFO ... (25 C = NN ...), code NN = NN.0 C" near the room's temperature plus a few; if CORE_EN is 0 or no sensor reads, again with `tmu_enable=1`; if the gate is CLOSED, with `tmu_ungate=1` |
 | 14 | `tmu=2` | "tmu: 2: publishing ...", then `sysctl kern.hakios.temp` from the shell (the big zone is the M3s', which cannot be started yet: The cores, above) |
 | 15 | `tmu=3 tmu_stop=T`, T a degree or two under the hottest zone run 13 read (40 at least) | within a few seconds "tmu: 3: ... 1 of 3 reads in a row", then "--- tmu: TOO HOT ..." and TWRP with the log: the stop works; later runs keep `tmu=3` at its default 110 |
@@ -783,7 +788,8 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Step | How |
 |---|---|
 | iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
-| Speaker audio | runs 10-12 above; should RDMA0 not move with its CPU off, a firmware mode (calliope booted once, RDMA0's registers read back) or a register dump from Android while sound plays ([AUDIO.md](AUDIO.md)) |
+| Speaker audio | plays (runs 10-12); to hear it, and the speakers' order (top/bottom, left/right) by ear; the mixer's way (SIFS0) and the amplifiers' current/voltage sense back over UAIF1 for a measured proof ([AUDIO.md](AUDIO.md)) |
+| Headphones, microphones | the CS47L93 on SPI (spi@10470000): an SPI driver, its supplies and reset, then the codec's ID, its FLL and UAIF0 ([AUDIO.md](AUDIO.md), "What is left") |
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
 | Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, the module from OTP, the files from `fw/` or VENDOR, INTx, the phone's address, the station, joining) are written: image `wifi-a` (`wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`) first, then `brcmfmac=8` ([WIFI.md](WIFI.md), "The plan on the phone"); not yet run |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
