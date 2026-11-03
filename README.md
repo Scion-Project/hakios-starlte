@@ -123,10 +123,13 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xCC000000 + 0x1043000 | the panel's buffer (GOP), reserved | UEFI, DT `s3cfb.bootloaderfb` |
 | **0xD0000000 + 64 MB** | **the payload, moved here at the start** (a step of 64 MB up if that is taken); its last MB the panic log (`pram`) | L `payload_home` |
 | 0xD4000000-0xD6FFFFFF | the display's scan-out buffers (`fb_flip`: two of the panel's size, to 0xD60A0000; `fb_dpp`: three of the display's, to 0xD71E0000 at the most of the panel's size) | `hakios.exynos_dpu.c` |
+| 0xD7000000-0xD7FFFFFF | the display's pool for `fb_zc`, its first part: one slot | `hakios.exynos_dpu.c` |
 | 0xD8000000-0xD9FFFFFF | the front camera's ring of four frames, camshot's still and picture (`cam_s9=4` and up): the WDMA's addresses are 32 bits, so it is here, outside XNU's RAM, mapped through IOKit | `hakios.exynos_camera.c` |
+| 0xD8000000-0xD8FFFFFF | also the iris camera's raw frame (2400 x 2400 RAW8) and irshot's picture (`iris_s9=4` and up): never with the front camera | `hakios.exynos_iris.c` |
 | 0xDA000000-0xDA3FFFFF | UFS's own-mode list, command descriptors and buffers (`ufs=3`; the controller is kept to 32 bits) | `hakios.ufshc.c` |
+| 0xDA400000-0xDBFFFFFF | the display's pool for `fb_zc`, its second part: two slots of 12 MB | `hakios.exynos_dpu.c` |
 | 0xDC000000-0xDEBFFFFF | Wi-Fi's DMA pool, only with `wifi_dma_at=0xDC000000` (off by default: the radio's memory is the kernel's own) | `hakios.lx.c` |
-| 0xDEC00000-0xE18FFFFF | the display's pool for `fb_zc`: three slots of 12 MB, one window-server surface each | `hakios.exynos_dpu.c` |
+| 0xDEC00000-0xDFFFFFFF | the display's pool for `fb_zc`, its third part: one slot (with 0xD7000000's and 0xDA400000's, four; nothing the display scans out is at or above 0xE0000000) | `hakios.exynos_dpu.c` |
 | 0xE1900000 + 30 MB | `secure_camera`, reserved | DT, UEFI |
 | 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
 | **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |
@@ -690,6 +693,10 @@ frames a second with `cam=5` (run cn3-7, 3 November; kernel PRs 159, 162). Each 
 2 November). The rear cameras are not started. [CAMERA.md](CAMERA.md) has the hardware of both cameras, the steps'
 expected lines and how iOS's camera stack is fed.
 
+`drivers/camera/hakios.exynos_iris.c` (`iris_s9=N`, off unless asked) is the iris scanner's camera, the S5K5F1 infrared
+sensor on CSIS3, and its IR LED: written, not yet seen. Its steps, its eye-safety limits and the plan for Face ID are in
+[CAMERA.md](CAMERA.md), "The iris camera".
+
 ## Wi-Fi
 
 Seen working on the phone (3 November, kernel PR 157): joined from iOS's Settings (WPA2), DHCP from configd, the
@@ -867,6 +874,7 @@ bootcpu=2` in each, as the column below leaves them out), or without `-n` to try
 | 8a | `cam_s9=1`, then `cam_s9=2` | "S2MPB02 ID ...", the LDOs "off"; then "THE SENSOR ANSWERS: model ID 0x...." and "powered down ... off as found" ([CAMERA.md](CAMERA.md)) |
 | 8b | `cam_s9=3`, then `4`, then `5`, one a run | "SMC 0x82000410 returned 0" and "MMU_CTRL 0x0"; then "THE PATTERN REACHED MEMORY"; then "frame end 1" and "THE PATCH ...: mean ..." (CAMERA.md's runs C3 to C5) |
 | 8c | `cam_s9=6 usb_gadget=5`, then `tools/usb-shot.py --cam -o cam.png` | "6: CAMSHOT READY"; then "usb: camshot 1 sent" and a picture from the front camera, or "usb: camshot failed: ..." with the CSIS's and the WDMA's registers (CAMERA.md's run C6) |
+| 8d | `cam_s9= iris_s9=1`, then `2`, `3`, `4`; then `iris_s9=5 usb_gadget=5` and `tools/usb-shot.py --iris -o iris.png` | the LDOs and the FLED registers (reads only); "model ID 5f1."; the seven LED registers read back; "a whole frame" and the middle patch's mean; then a grey infrared picture ([CAMERA.md](CAMERA.md), runs I1 to I5) |
 | 9 | `panel=1 panel_gamma=1`, then `backlight=1` | the gamma read and logged only; then which key iOS's brightness slider sets (Brightness, above) |
 | 10 | `abox=6 max98512=2` (run a1, seen) | "ABOX IP_INDEX ... = 0x41424f58", "PLL_AUD 1179648040 Hz", "gpb1-0..3 with UAIF1 on: 1856, 192, 0, 0 changes", "max98512: top (0x39): MAX98512, revision 0x41" and the bottom one's ([AUDIO.md](AUDIO.md)) |
 | 11 | `abox=7 max98512=3` (runs b1, seen) | "ABOX's SysMMU translates (CTRL 0x4) ... switched off", "the ring: 16384 bytes in abox_rmem at 0xfb200000", "192417 bytes a second read", "the guard: peaks in 3277"; `abox tone 3` on the USB console again |
