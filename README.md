@@ -33,9 +33,8 @@ at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH
 "iPhone Microphone" (`abox_mic=1`, given for a run; AUDIO.md, "The microphone in iOS").
 
 Not working yet: the headphones (written behind `cs47l93_hp=1`, not yet tried: AUDIO.md), Bluetooth in iOS
-(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras, the seventh
-core (core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory
-layout). The
+(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras and the seventh
+core (core 1, which S-Boot parks: The cores). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -136,6 +135,7 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xFDA00000-0xFF607FFF | `exynos_ss`: its header 0xFDA00000, `log_kernel` 0xFDA10000 (the kernel's log for TWRP with `esslog=1`), ..., `log_pstore` 0xFED10000 + 32 KB (the loader's RAM log and ramoops' record; reserved in UEFI) | DT, UEFI |
 | 0xFF800000 + 8 MB | `fimc_is_lib`, no-map | DT |
 | 0x880000000 + 2 GB | XNU's RAM: the largest free block (`physBase`, `memSize`); in it the kernel at +48 MB, the ramdisk after it, the device tree (64 KB) and `boot_args` after that | L `choose_window`, `run_kernel` |
+| the free pieces of 0x80200000-0x8EFFFFFF, 0x98000000-0xCBFFFFFF (less `rkp_region`, `tima_region`, `seclog_mem`) and 0xE3700000-0xEFFFFFFF | XNU's RAM too, beside the window: about 1170 MB in 7 ranges, for 3218 MB in all (below) | L `extra_ram_claim`, kernel patch 1512 |
 
 The kernel's ranges from 0xD0000000 to 0xE18FFFFF, and the keep-outs above, are one table in the common repository,
 `xnu/files/bsd/sys/hakios.exynos9810_mem.h`, which the display, the camera and UFS take theirs from, with checks at build
@@ -144,8 +144,47 @@ camera's, UFS's and Wi-Fi's ranges).
 
 The three ranges in bold from 0xF0000000 to 0xFD9FFFFF are the platform's keep-outs: at the start the loader takes every free
 page of them from UEFI as reserved memory (`keep_out_reserve`), so nothing UEFI hands out while it stays alive beside the kernel
-lands there, and XNU's window is never allowed to cover them. XNU's memory is only `[physBase, physBase + memSize)`, so it never
-has them as free memory.
+lands there, and XNU's window is never allowed to cover them; nor is any of the extra RAM below.
+
+### The low bank's free RAM: XNU's too
+
+The window is the 2 GB bank from 0x880000000; the low bank's free RAM, about 1.1 GB of the other 2 GB, is the kernel's as
+well. Apple's XNU knows one bank (`[physBase, physBase + memSize)`, the pmap's tables indexed from `physBase`), so the kernel
+has a patch for it (`xnu/patches/1512-arm-extra-ram.patch` in the common repository): the loader names the extra ranges in
+the device tree (`/chosen` `hakios-extra-ram`, pairs of base and size); `arm_vm_init()` maps them in the physical aperture
+(more `ptov_table` entries) and counts them in `max_mem`; the pmap gives their pages indices after the window's
+(`pa_valid()`, `pa_index()`), so they are managed pages like any other; and `arm_vm_prot_finalize()` gives them to the VM
+before `bsd_init()`, as `vm_page_create()` pages (the way `ml_static_mfree()` gives back the kernel's boot memory), so that
+jetsam's and the pageout daemon's levels count them. `hw.memsize` says the sum.
+
+Where it may come from is a list in the loader (`exynos9810_extra_ram`; on by default on the S9, the S9+ and the Note9,
+which have not been seen with it, only with `extra_ram=1`), and only what UEFI's
+memory map calls free there is taken (`extra_ram_claim`): 0x80200000-0x8EFFFFFF (`sec_debug_magic` at 0x80000000 kept),
+0x98000000-0xAF7FFFFF, 0xB1800000-0xB7FFFFFF, 0xB8200000-0xBFFFFFFF and 0xC0080000-0xCBFFFFFF (`rkp_region`, `tima_region`,
+`seclog_mem` between them), 0xE3700000-0xEFFFFFFF (from the end of `secure_camera` to the CP's). Never in it: the UEFI image,
+its heap and 80 MB more for UEFI's allocator, which stays alive beside the kernel (0x8F000000-0x97FFFFFF, `zswap_debug` with
+them); the loader's image at 0xA1000000; the secure holes Silicium's RamManagerLib takes out of the map and whatever else the firmware holds (in the run below
+0xBC800000-0xBFFFFFFF was not free); the panel's buffer; every range of `hakios.exynos9810_mem.h` (0xD0000000-0xE18FFFFF); `secure_camera`;
+and everything from 0xF0000000 (the keep-outs, `exynos_ss`, `fimc_is_lib`). The pieces are taken from UEFI as reserved
+memory, and each 16 KB page is written at both ends and read back from the RAM itself (out of the cache) before it is given:
+a piece that reads back wrong stays out. `extra_ram=0` among the kernel's arguments leaves it all out (the window alone, as
+before). The loader's third `layout:` line names the ranges.
+
+Seen on the phone (3 November, `ram-a` and `ram-c`, the daily's arguments): "extra RAM: 1170 MB in 7 ranges taken from
+UEFI beside the window (7 pieces free, 0 MB failed the test)", "layout: extra RAM for XNU: 80200000..8effffff
+98000000..a0ffffff a1994000..af7fffff b1800000..b7ffffff b8200000..bc7fffff c0080000..cbffffff e3700000..efffffff
+(1170 MB); XNU's RAM in all 3218 MB"; `sysctl hw.memsize` 3375284224 (2147483648 before), iOS's "memory 3218 MB". With
+SpringBoard, the camera's stream and Wi-Fi up, the kernel's memory line at three to five minutes: "free 434-458, files
+1632-1646, programs 588-621, wired 513-518 ... compressor 0 (holding 0) MB; available 2067-2104, kills below 282 (the idle)
+and 125 (anybody)", where the daily (the same arguments, the window alone) says "free 12-22, files 766-776, programs
+672-675, wired 539-541 ... compressor 34 (holding 120) MB; available 787-789, kills below 196 (the idle) and 98 (anybody)":
+jetsam's levels rise with `max_mem`, and the room above them is 1.3 GB more. (`ram-a` counted the extra pages as wired
+too, "wired 1695": `vm_page_bootstrap()` had counted every page of `max_mem` not free then as wired; the patch takes them
+off again, as `ml_static_mfree()` does its own, and `ram-c` says 517.)
+
+The drivers whose DMA engines have 32-bit addresses (the camera's WDMA, UFS's own mode, the display's) still take the
+fixed ranges of `hakios.exynos9810_mem.h`; with RAM of the kernel's own below 4 GB now, they could take it from the VM
+instead.
 
 ## The cores
 
@@ -870,6 +909,6 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Storage, writing | /private/var kept in USERDATA works (above); next an image with ReportCrash allowed for crash reports |
 | The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
 | The seventh core | core 1, which S-Boot parks before the hand-over (The cores): not reached yet |
-| The low RAM bank | XNU has the 2 GB bank from 0x880000000; the 2 GB bank below 4 GB (less its reserved ranges and the carve-outs, Memory layout) is not given to it |
+| The low RAM bank | its free RAM is XNU's beside the 2 GB window (Memory layout, "The low bank's free RAM"): 3218 MB in all; next, the drivers with 32-bit DMA could take their buffers from it instead of fixed ranges |
 | Sensors | the hub reads six sensors and iOS takes orientation and proximity (`shub=6`, [SENSORS.md](SENSORS.md)); a default once the line has room; the gyroscope's and magnetometer's units, auto-brightness |
 | The modem, the rear cameras | the Shannon CP ([docs/modem-plan.md](docs/modem-plan.md)) and the rear cameras are not started |
