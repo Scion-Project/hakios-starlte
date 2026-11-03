@@ -66,19 +66,66 @@ boost's output reading. `abox tone S` makes steps 1-7 again (not while `abox=8` 
   the ADC's channels do not move), so the proof is ABOX's DMA rate and the guard's peaks. The measured proof would be the
   amplifiers' current and voltage sense (MEAS_EN, sent back on UAIF1's data in) captured by a WDMA.
 - The mixer's way (SIFS0): RDMA0 stalls after 32 bytes; its sample bank (SBANK_MIXP) reads 0. Not needed for one stream.
-- Headphones and the microphones: the CS47L93 (Cirrus "madera") on `spi@10470000`, chip select 0, at up to 25 MHz,
-  reset on gpg1-0, the bus on gpp0-4..6 (SPI2, function 2) with its chip select gpp0-7; AVDD/DBVDD1/CPVDD1 from the PMIC's
-  LDO33 (vdd_pmic_codec_1p8, always on) and CPVDD2/DCVDD from LDO34 (vdd_codec_1p2, 1.2 V, off until the codec's driver
-  asks: a PMIC write); its AIF1 and AIF3 to ABOX's UAIFs. Needs an SPI driver for the 9810 (none here yet), the
-  supplies, the reset, then the codec's ID; its FLL and its DSP firmware after that. Upstream Linux's madera driver
-  supports the CS47L93; the Tab Active3 work has the WDMA side of capture.
+- Headphones: the CS47L93's OUT2 (below, "The codec"). The main microphone records.
 - The amplifiers' start costs 31 ms of I2C after iOS's first loud frames; the beginning of a click may be lost.
+
+## The codec: the main microphone, and the headphones' path (3 November)
+
+The headphones, the jack and the microphones go through the audio codec, a Cirrus Logic CS47L93 (Cirrus's Madera
+family) on SPI: spi@10470000, USI01 of PERIC0, chip select 0. Two more files in the common repository, built into
+this phone's kernel (`configs/starlte.config`) and off until a boot-argument asks:
+
+| Driver | Boot-argument | What it does |
+|---|---|---|
+| `drivers/core/hakios.exynos_spi.c` | none | an Exynos SPI master, polled: the USI's clocks and mode (2), the pins, the FIFO, the chip select by hand (`sys/hakios.exynos_spi.h`) |
+| `drivers/audio/hakios.cs47l93.c` | `cs47l93=N`, N of 6 steps | 1 a look; 2 LDO34 (DCVDD, 1.2 V) checked on, the reset held and let go, the ID read; 3 the jack; 4 MCLK1 (the SoC's CLKOUT0, 26 MHz), FLL1, SYSCLK 98.304 MHz; 5 MICVDD, MICBIAS1/1A, IN3L (the main microphone, digital); 6 AIF1, a slave I2S of 2 x 16 bits at 48 kHz, sending IN3L |
+
+ABOX's side of the capture is `hakios.exynos_abox.c`'s: the console's `abox rec S` makes steps 1-4 (power, clocks,
+pins) and then UAIF0 (the codec's link, ABOX the master, 1.536 MHz BCLK) -> NSRC0 -> SPUM (no ASRC) -> SIFM0 -> WDMA1
+into 64 KB of abox_rmem, copied out every millisecond for S seconds; then each channel's mean, RMS and peak, and the
+PCM goes out on the USB console in a camshot's framing (`SHOT <w> 1 ...`, 48 kHz 16-bit stereo, little-endian).
+`codec` on the console says the codec's state; `codec r REG [N]` / `codec w REG VALUE` read and write its registers;
+`codec mic` makes steps 1-6 again.
+
+Two things the firmware-less path needed, found on the phone (phone 1, 3 November):
+
+- NSRC0's sample bank in SPUM (`SPUM_SBANK_NSRC0`, 0x17C50328, named in the Galaxy S10's kernel) reads 0 after the
+  boot. With it 0, WDMA1 says PROGRESS and writes nothing, and UAIF0's STATUS says ERROR_OF_MIC; given 512 bytes, as
+  RDMA0's bank, WDMA1 writes 192000 bytes a second.
+- AIF1's four pins are the codec's GPIO5-8, plain GPIOs after its reset (`0x2001`); ABOX then records zeroes. Given
+  their alternate function (FN 0, bus hold: the device tree's `cs47l93-gpio-defaults`) the codec's samples come.
+
+### The runs (phone 1, 2ab4dd7d2a037ece)
+
+| Image | Arguments | What it showed |
+|---|---|---|
+| c1 | `cs47l93=2` | `ID 6371 (a CS47L92/93), revision 0001`; `booted (IRQ1_RAW_STATUS_1 0080) within 5097 us`; the SPI: 0 errors. LDO33 reads `ec` and LDO34 `e8` (on, 1.2 V) as the boot leaves them; the reset pin is an output, low |
+| c2 | `abox=1 cs47l93=6` | FLL1 from MCLK1 locks in about 1 ms (N 22, THETA 1114, LAMBDA 1625, fractional, the fast oscillator); SYSTEM_CLOCK_1 `0444`. Step 5 stopped at IN_VU reading 0 (fixed); `abox rec`: WDMA1 waits, ERROR_OF_MIC (the sample bank, above); then zeroes (the pins, above) |
+| c4 | `abox=1 max98512=3 cs47l93=6` | the six steps; `abox rec 3`: 192480 bytes a second, UAIF0 STATUS 0, the PCM on the Mac whole (`END` after it) |
+
+It was night: no sound was played and nobody spoke, so the microphone was shown without any:
+
+- The noise floor varies and is not a constant: at IN3L's +8 dB (the default) RMS 1.5 of 32768 (-86.6 dBFS), samples
+  from -8 to 7, 15 values; at +31.5 dB RMS 22-24, peaks 114-127 (23.5 dB more gain, 15 times the RMS: the input's own
+  noise, scaled by its gain); at 0 dB RMS under 1.
+- IN3L muted (ADC_DIGITAL_VOLUME_3L's mute): 47995 of 48000 samples exactly 0.
+- The codec's tone generator (0x20 TONE1_ENA) into AIF1TX2, no output driver on (OUTPUT_ENABLES_1 reads 0): the right
+  channel came back as a clean 1 kHz sine at full scale (2002 zero crossings a second, peak 32751), the left (IN3L) at
+  its noise floor: the codec -> AIF1 -> UAIF0 -> WDMA1 -> memory -> USB path is exact.
+
+Not done yet: the headphones (OUT2's enable and Cirrus's headphone sequence; its mixers are set from AIF1RX1/2, the
+output stays off), the jack's microphone and impedance detection, the other microphones (IN4L, the headset's IN1BL),
+Cirrus's revision patch, and the recording reaching iOS (a sink for `/dev/hakios-audio`'s input side).
 
 ## Sources
 
 The S9's kernel (`sound/soc/samsung/abox/`: abox.c, abox.h, abox_rdma.c, abox_if.c; `sound/soc/codecs/max98512.c`,
-`max98512.h`; the device tree `exynos9810-starlte_eur_open_26.dts`), the Galaxy Tab Active3's firmware-less A-Box work
-(github.com/exynos-linux/samsung-gtactive3wifi: docs/re/abox.md and patch 0106, RDMA CTRL0's fields, SYSPOWER_CTRL) and
-the Galaxy S10's
+`madera.c`, `cs47l92.c`; `drivers/mfd/madera-core.c`, `madera-spi.c`, `cs47l92-tables.c`; `drivers/extcon/extcon-madera.c`;
+`drivers/pinctrl/cirrus/`; `drivers/spi/spi-s3c64xx.c`; `drivers/soc/samsung/usi_v2.c`; `sound/soc/samsung/star_madera.c`;
+`max98512.h`; the device tree `exynos9810-starlte_eur_open_26.dts`) and the Galaxy S10's
 (github.com/ivanmeler/android_kernel_samsung_beyondlte: `abox_soc.h`, `abox_cmpnt_v20.c`, `abox_rdma.c`, `Kconfig`),
-both GPL-2.0, read for facts only. Nothing of them is copied; the drivers' heads name the functions each fact comes from.
+both GPL-2.0, read for facts only; the Galaxy Tab Active3's firmware-less ABOX work (github.com/exynos-linux/
+samsung-gtactive3wifi, docs/re/abox.md and patch 0106: RDMA CTRL0's fields, SYSPOWER_CTRL, the WDMAs' registers and the
+capture's route), read for facts;
+and the phone's own `/vendor/etc/mixer_paths.xml` (the S9's routes: UAIF0 the codec's, IN3L the main microphone,
+HPOUT2 the headphones). Nothing of them is copied; the drivers' heads name the functions each fact comes from.
