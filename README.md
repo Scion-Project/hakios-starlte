@@ -29,11 +29,13 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 
 Seen working but not a default, for want of room on the line (Defaults): the sensors, the hub in the BCM4775 read at
 50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md); Bluetooth, the chip patched
-at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH.md).
+at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH.md); the codec's microphone as iOS's
+"iPhone Microphone" (`abox_mic=1`, given for a run; AUDIO.md, "The microphone in iOS").
 
-Not working yet: the headphones and the recording reaching iOS (the CS47L93 codec's main microphone records), Bluetooth
-in iOS (`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras, the
-seventh core (core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
+Not working yet: the headphones (written behind `cs47l93_hp=1`, not yet tried: AUDIO.md), Bluetooth in iOS
+(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md), the rear cameras, the seventh
+core (core 1, which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory
+layout). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -249,9 +251,9 @@ about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`
 own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
 A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
 `device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
-SENSORS.md) and Bluetooth (`bt=7`, BLUETOOTH.md) have been seen working but are not defaults: `shub=6` does not fit
-(432 + 7 is over the 437 the line leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the
-installer) for a run with them.
+SENSORS.md), Bluetooth (`bt=7`, BLUETOOTH.md) and the microphone in iOS (`abox_mic=1`, AUDIO.md) have been seen
+working but are not defaults: `shub=6` and `abox_mic=1` do not fit (432 + 7 and 432 + 11 are over the 437 the line
+leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the installer) for a run with them.
 
 ## On the phone
 
@@ -687,7 +689,8 @@ none lost, the amplifiers on while they play). Nobody has listened yet: the proo
 and the amplifiers' registers ([AUDIO.md](AUDIO.md), with how to hear it). `abox` on the USB console says the state and `abox tone 3` plays the tone again (with `abox=7`).
 The codec, a CS47L93 on SPI (`cs47l93=6`, a default; `drivers/audio/hakios.cs47l93.c` on `drivers/core/hakios.exynos_spi.c`):
 its ID, power, FLL and main microphone, recorded through UAIF0 -> WDMA1 by the console's `abox rec S` (phone 1,
-3 November; [AUDIO.md](AUDIO.md), "The codec"). The headphones and the recording reaching iOS are not done yet.
+3 November; [AUDIO.md](AUDIO.md), "The codec"); with `abox_mic=1` (not a default) it is iOS's microphone, through
+`/dev/hakios-mic` (AUDIO.md, "The microphone in iOS"). The headphones are written behind `cs47l93_hp=1`, not yet tried.
 
 ## Temperatures
 
@@ -860,7 +863,7 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 | Step | How |
 |---|---|
 | Speaker audio | plays (runs 10-12); to hear it, and the speakers' order (top/bottom, left/right) by ear; the mixer's way (SIFS0) and the amplifiers' current/voltage sense back over UAIF1 for a measured proof ([AUDIO.md](AUDIO.md)) |
-| Headphones, microphones | the CS47L93 records its main microphone (`cs47l93=6`); next OUT2 and Cirrus's headphone sequence, the jack's microphone, and the recording to iOS (an input side for `/dev/hakios-audio`) ([AUDIO.md](AUDIO.md), "The codec") |
+| Headphones, microphones | the main microphone is iOS's (`cs47l93=6 abox_mic=1`); next the headphones' first run (`cs47l93_hp=1`), the jack's microphone and the other microphones ([AUDIO.md](AUDIO.md), "The headphones") |
 | Bluetooth | on the phone (3 November): the chip powered and patched, 4 Mbaud, an inquiry and an LE scan from the USB console (`bt=7`, given for a run, not a default; `bt scan`); for iOS, `/dev/cu.bluetooth` and the address `bluetoothd` needs are there and it stays up, waiting on BlueTool's boot ([BLUETOOTH.md](BLUETOOTH.md)) |
 | Wi-Fi | works (joined from Settings, DHCP, the Internet); next: roaming, power saving ([WIFI.md](WIFI.md)) |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |

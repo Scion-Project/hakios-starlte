@@ -67,7 +67,8 @@ boost's output reading. `abox tone S` makes steps 1-7 again (not while `abox=8` 
   the ADC's channels do not move), so the proof is ABOX's DMA rate and the guard's peaks. The measured proof would be the
   amplifiers' current and voltage sense (MEAS_EN, sent back on UAIF1's data in) captured by a WDMA.
 - The mixer's way (SIFS0): RDMA0 stalls after 32 bytes; its sample bank (SBANK_MIXP) reads 0. Not needed for one stream.
-- Headphones: the CS47L93's OUT2 (below, "The codec"). The main microphone records.
+- Headphones: the CS47L93's OUT2, written behind `cs47l93_hp=1` and not yet tried (below, "The headphones"). The main
+  microphone is iOS's (below, "The microphone in iOS").
 - The amplifiers' start costs 31 ms of I2C after iOS's first loud frames; the beginning of a click may be lost.
 
 ## The codec: the main microphone, and the headphones' path (3 November)
@@ -114,9 +115,89 @@ It was night: no sound was played and nobody spoke, so the microphone was shown 
   channel came back as a clean 1 kHz sine at full scale (2002 zero crossings a second, peak 32751), the left (IN3L) at
   its noise floor: the codec -> AIF1 -> UAIF0 -> WDMA1 -> memory -> USB path is exact.
 
-Not done yet: the headphones (OUT2's enable and Cirrus's headphone sequence; its mixers are set from AIF1RX1/2, the
-output stays off), the jack's microphone and impedance detection, the other microphones (IN4L, the headset's IN1BL),
-Cirrus's revision patch, and the recording reaching iOS (a sink for `/dev/hakios-audio`'s input side).
+Not done then: the headphones and the recording reaching iOS (both below), the jack's microphone and impedance
+detection, the other microphones (IN4L, the headset's IN1BL).
+
+## The microphone in iOS (3 November, phone 1)
+
+`abox_mic=1` with `abox=8 cs47l93=6`: iOS's input is the codec's main microphone (`abox_mic=1` is not one of the S9's
+defaults, whose line has no room left: give it for a run, README.md, Defaults). Nothing new in user space: the
+audio server's plug-in (`userland/src/audio_plugin.c`, HakiosAudio.driver) has had a device "Codec" since the POCO's
+microphone, one 48 kHz 16-bit channel read from `/dev/hakios-mic`, of which iOS's virtual audio device makes the
+built-in microphone. What is new is the kernel's side:
+
+- `/dev/hakios-mic` moved from `hakios.mic.c` (the POCO's, through its DSP) into `hakios.audio.c`, the same for every
+  phone: a ring of 341 ms, read 40 ms behind the microphone, open only while iOS's input runs
+  (`hakios_audio_input_create/_wanted/_put`).
+- ABOX's step 8 makes it (with `abox_mic=1`) and, whenever it is open, starts the capture "abox rec" proved: UAIF0 ->
+  NSRC0 -> SIFM0 -> WDMA1 into the 64 KB ring at abox_rmem +1 MB, followed every 2 ms by the same loop that feeds
+  RDMA0; the left slot (AIF1TX1: IN3L) goes into `/dev/hakios-mic`. When iOS closes it, WDMA1 and UAIF0's microphone
+  side stop, and a line says how long, how loud (RMS, peak) and how many samples were exactly 0.
+
+What iOS saw (`mic_rms`: AVAudioSession in the record category, which has no output, then an AudioQueue of 48 kHz mono
+16-bit for 3 s; built on the MacBook with the iOS SDK, `-target arm64-apple-ios16.5`, signed ad hoc with
+`com.apple.private.tcc.allow` kTCCServiceMicrophone, and in the ramdisk of that test only). The image: the daily
+arguments with `abox=8 cs47l93=6 abox_mic=1` and NO `max98512` (no amplifier switched on: night, nothing to be heard):
+
+| Run | What | iOS (mic_rms) | The kernel (what WDMA1 brought) |
+|---|---|---|---|
+| A | the room, silent | `MicrophoneBuiltIn "iPhone Microphone"` the route's one input; 144000 samples, RMS 94.8 (-50.8 dBFS), peak 696 | 3.13 s, RMS 3, peak 25; 0 frames skipped, 0 reads short |
+| B | the room | RMS 57.9 (-55.0 dBFS), peak 308, 3027 of 144000 samples 0 | 3.11 s, RMS 1, peak 10 |
+| C | the same program unsigned | the permission to record `deny` (TCC): no samples | (the device was opened: 6 s heard) |
+| D | the codec's tone generator into AIF1TX1 (`codec w 0x0700 0x0004`, `codec w 0x0020 0x0001`; no output on) | a clean tone: zero crossings 987 Hz, peak 29992, RMS 5902 (iOS's input processing brings a full-scale tone down: 12808 in the first 0.1 s, 2811 by the ninth) | RMS 23170, peak 32751, 0 samples 0: a full-scale sine |
+
+Twice more on the same night (images mic-t2 and mic-t3: the same, with `cs47l93_hp=1 cs47l93_hp_vol=0` added, mic-t3
+with the plug-in rebuilt from this branch): the room 3.11-3.13 s at RMS 1 in the kernel, RMS 57-61 in iOS; the tone
+again a 987 Hz tone in iOS. With `cs47l93_hp=1`, at power-up: `Cirrus's register patch written (38 16-bit, 28 32-bit
+registers), 2 not read back as written` (0x180B and 0x190B, IRQ masks, read 0; every 32-bit write of the write sequencer
+read back exact: the 32-bit register access works); `the headphones: the jack watched (nothing plugged in now)`;
+OUTPUT_ENABLES_1 read 0 throughout (OUT2 never on). The rebuilt plug-in: `the speaker has a jack (empty)`, and the
+microphone through it as before.
+
+The noise floor reaches iOS some 30 dB up (its input chain's gain): quiet, but never zeros, and the codec's own
+tone comes through as a tone. Voice Memos and dictation use the same input (an app has its own microphone
+entitlement; a program of ours needs one, run C).
+
+## The headphones (`cs47l93_hp=1`: written, NOT tried yet)
+
+The code is in, off by default; nothing of it runs without `cs47l93_hp=1`. With it, the codec's driver
+(`hakios.cs47l93.c`, THE HEADPHONES in its head) does what Cirrus's driver does on Android:
+
+- at power-up (step 2), Cirrus's register patch for the chip (`cs47l92_reva_16_patch` and the write sequencer's
+  `cs47l92_reva_32_patch`), each register read back;
+- after step 6, the jack read every 100 ms (`MICD_CLAMP_RISE` 0: plugged in), a change taken after three equal reads;
+- plugged in: first ABOX (`hakios_abox_headphones(true)`: the amplifiers stopped and kept off, UAIF0's speaker side
+  routed from the SIF UAIF1 takes, SIFS1, and switched on: iOS's samples into AIF1RX1/2, which step 6 mixes into
+  OUT2L/R at 0 dB), then OUT2: its digital volume (`cs47l93_hp_vol`, default 0x68, -12 dB) set muted,
+  OUT2L_ENA/OUT2R_ENA, 6 ms an output, unmuted;
+- pulled out: OUT2 muted and off (1 ms an output), then the sound is the speakers' again;
+- each change to `/dev/hakios-audio` (`HAKIOS_AUDIO_GET_ROUTE`); the plug-in polls it and tells the HAL that the
+  speaker device's `kAudioDevicePropertyJackIsConnected` changed.
+
+Not done: the headphones' impedance (HPDET), the headset's microphone and buttons, the output clamp around the jack's
+insertion (a click is possible). One INFERRED register fact: that SIFS1 may feed UAIF0 and UAIF1 at once.
+
+### The test, for the owner (daytime)
+
+1. An image with the daily arguments and `abox=8 max98512=3 cs47l93=6 abox_mic=1 cs47l93_hp=1` (and `usb_gadget=5`,
+   in the daily ones, for the console): `~/s9/out/s9mic-hp.img` on the MacBook is that, `loader_return_after=0`, with
+   the plug-in of this branch in its ramdisk (`~/s9/out/s9mic-daily.img`: the same without `cs47l93_hp=1`, the old
+   plug-in; the speakers and the microphone). Headphones NOT on your ears for the first plug-in.
+2. Boot with nothing in the jack; play music quietly from the speakers. The log says
+   `cs47l93: the headphones: the jack watched (nothing plugged in now)` and, once the patch was written,
+   `cs47l93: Cirrus's register patch written (38 16-bit, 28 32-bit registers), N not read back as written`.
+3. Plug the headphones in. Within half a second: `cs47l93: the jack: something plugged in`, `abox: headphones: iOS's
+   sound to UAIF0 ...`, `abox: 8: the headphones have the sound: stopping the amplifiers`, `cs47l93: the headphones:
+   OUT2 on (OUTPUT_STATUS_1 ...)`, `hakios: audio: the jack: plugged in; the kernel sends the sound to the
+   headphones`. The speakers stop; the music is in the headphones (at -12 dB, under iOS's volume).
+4. Pull them out: `OUT2 muted and off`, `the sound is the speakers' again`; the speakers come back with the next sound.
+5. If the headphones stay silent, on the USB console: `codec r 0x400 2` (0x400's bits 3 and 2 set, 0x401 their status),
+   `codec r 0x419 1` and `codec r 0x41d 1` (bit 8, the mute, clear), `abox r abox 0x40 1` (ROUTE_CTRL0: [3:0] the same
+   as [7:4]), `abox r abox 0x500 1` (UAIF0 CTRL0: bit 0, SPK_ENABLE, set). Louder or quieter: `cs47l93_hp_vol=0x70`
+   (-8 dB) or `0x50` (-24 dB); never above 0x80 (0 dB).
+6. iOS's side: whether Control Center's output and the volume HUD say "Headphones" after the jack goes in (the plug-in
+   only says the speaker's jack is connected; whether the virtual audio device makes a headphones route of that is
+   what this shows). Either way the sound goes where the kernel sends it.
 
 ## Sources
 

@@ -8,7 +8,7 @@ schema_version = 1
 name = "starlte"
 soc = "Exynos 9810"
 os_profile = "ios-16.5-20F66"
-summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s, the CS47L93 codec's main microphone recorded through ABOX. Seen working but not a default (no room on the line): the sensor hub's six sensors and iOS's orientation and proximity (shub=6, SENSORS.md); Bluetooth patched at 4 Mbaud with an LE scan from the USB console (bt=7, BLUETOOTH.md). Not yet: headphones and the recording reaching iOS, Bluetooth in iOS, modem, rear cameras, core 1, the low RAM bank."
+summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s, the CS47L93 codec's main microphone recorded through ABOX. Seen working but not a default (no room on the line): the sensor hub's six sensors and iOS's orientation and proximity (shub=6, SENSORS.md); Bluetooth patched at 4 Mbaud with an LE scan from the USB console (bt=7, BLUETOOTH.md); the codec's microphone as iOS's (abox_mic=1, AUDIO.md). Not yet: headphones, Bluetooth in iOS, modem, rear cameras, core 1, the low RAM bank."
 
 [[area]]
 id = "upstream"
@@ -35,7 +35,7 @@ procedure = ["tools/hakios-device.py sync starlte in the kernel tree, then make 
 findings = ["Each driver goes up in logged steps (driver=N) so a first phone run is safe; device.conf records each subsystem as seen on the phone, or written and not yet seen. Diagnostics (fps_log, systrace, *_probe, *_log) are never defaults."]
 completion = ["The kernel builds with starlte_defconfig and the image boots iOS 16.5 on the phone (see firmware and cpu)."]
 limits = ["The kernel's command line holds 607 characters: the defaults take 422 and a run about 155 more (CONFIG_CMDLINE_RUN), so a run's added diagnostics have about 30 left; mkimage.sh warns past that."]
-next_action = ["Add each driver to the defaults once it is seen working on the phone (the torch, the headphones; the sensors and Bluetooth once the line has room)."]
+next_action = ["Add each driver to the defaults once it is seen working on the phone (the torch, the headphones; the sensors, Bluetooth and the microphone in iOS once the line has room)."]
 
 [[area.evidence]]
 kind = "source"
@@ -258,8 +258,8 @@ configuration = ["abox=8 max98512=3, defaults (ABOX's CPU off: RDMA0 -> SIFS1 ->
 procedure = ["Bring up the ABOX route, play a tone (abox=7), then hand iOS's output and volume to it (abox=8)."]
 findings = ["ABOX's DMA runs without its firmware at 192000 bytes a second; a 1 kHz tone and iOS's own sounds play through both amplifiers (frames from iOS, none lost).", "The CS47L93 answers on SPI (ID 6371), FLL1 locks, and its main microphone records through UAIF0 -> WDMA1 at 192480 bytes a second; its tone generator came back as a clean 1 kHz sine (phone 1, 3 November)."]
 completion = ["A tone, then iOS's sound, from the speakers: done."]
-limits = ["The proof is the DMA's rate, the guard's peaks and the amplifiers' registers; the codec's microphone recording does not reach iOS yet, and the headphones are not started."]
-next_action = ["The CS47L93's headphones (OUT2) and the recording to iOS (AUDIO.md, The codec)."]
+limits = ["The proof is the DMA's rate, the guard's peaks and the amplifiers' registers; the microphone reaches iOS only with abox_mic=1, not a default; the headphones are written behind cs47l93_hp=1, not yet tried."]
+next_action = ["The headphones' first run (cs47l93_hp=1, AUDIO.md, The headphones)."]
 
 [[area.evidence]]
 kind = "device"
