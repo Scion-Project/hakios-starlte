@@ -311,6 +311,67 @@ devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=ex
 Each step says what it found (`ufs: own: ...`) and stops with `ufs: own: step N done`; go on only when it says what
 the table above expects.
 
+### ufs=3: the kernel's own driver, checked against the loader's reads
+
+`ufs=3` (off by default; written, not yet seen on the phone) puts the two together. The loader serves the storage as with
+`ufs=2`, and the kernel's own driver takes the controller from it only after it has read the same blocks both ways and
+found them the same. Anything wrong before the switch gives the controller back to UEFI and the run goes on through the
+loader (`ufs=2`). `ufs=2` stays the default and is unchanged. In order, each step said in the log before it is taken:
+
+1. **References through the loader**: every unit's head (protective MBR, GPT header and table: blocks 0-5 of LUN 0 on this
+   phone) and its backup GPT, and the first, middle and last block of every partition.
+2. **The controller**, as Silicium's UEFI left it: own mode's steps 1-5 (`exynos9810`, read back, never reset).
+3. **The self-test**: each of the loader's units is the one logical unit of the same capacity whose head reads the same,
+   byte for byte; its GPT read by the kernel is right (header and table CRCs, the backup's) and has every partition of the
+   loader's table at the same blocks and of the same size; the backup GPT and the three blocks of every partition read the
+   same both ways. One difference and the kernel aborts.
+4. **The fences**, set in the controller driver's whitelist before any write window, and checked on every WRITE(10/16)
+   and SYNCHRONIZE CACHE after the window's own check: LBA 0-5 and both GPTs of every unit; EFS, SEC_EFS, CPEFS, RADIO,
+   CP_DEBUG, PERSISTENT, KEYSTORAGE, PARAM, UP_PARAM, STEADY, BOTA0-2, DTB, DTBO, BOOT, RECOVERY, NAD_REFER, OMR, HIDDEN
+   (and the rest of own mode's never-written list, and any name with "efs" in it) by their GPT blocks; every logical unit
+   but USERDATA's (the boot units hold the boot loaders); and everything of USERDATA's unit before and after USERDATA.
+   UNMAP, FORMAT UNIT, WRITE BUFFER, the security protocols, vendor commands, task management and every query that writes
+   (descriptors, attributes, flags) are not on the whitelist at all; on the S9 not even fDeviceInit is sent. Each refusal
+   is logged with its reason (`ufs: native: REFUSED (protected: EFS) ...`), and the fences are then tried on made-up
+   writes that are judged and never sent: LBA 0, the GPTs, the first and last block of every partition, the other units.
+5. **The window**: USERDATA's blocks, only with `ufs_write=1` (the loader's offer, checked as for `ufs=2`).
+   `ufs_native_ro=1` makes the whole run read only, USERDATA and the loader's write path included.
+6. **The switch**: every read, and USERDATA's writes, through the kernel's driver; the loader is asked for nothing more.
+   A read that fails afterwards gives the controller back and goes on through the loader; a write that fails is an
+   error, never retried the other way. `ufs_native_verify=1` reads every write back.
+
+The loader (`xnuloader/loader.c`) takes `ufs=3` for `ufs=2`, and refuses every request while its page says the kernel's
+list is in, so UEFI's driver never rings behind a list that is not its own. Core 0 stays the loader's: it is the
+reference and the fallback, and it also feeds the cluster watchdog, watches the kernel's heartbeat and writes its log on a
+hang. Giving core 0 to the kernel (`cpus=7`, the kernel started on core 0 without `bootcpu=`) needs a loader that reads the
+references before it jumps, and a kernel that feeds the watchdog and keeps its own log; that is the next step, not this one.
+
+The first runs, one image each, the log read in TWRP (pstore) or over USB (`usb_gadget=5`):
+
+```sh
+# A: read only, the self-test and the fences (USERDATA not written)
+devices/starlte/mkimage.sh -s 150 cpus=6 bootcpu=2 ... ufs=3 ufs_native_ro=1 system_apfs=ufs_SYSTEM
+# B: /private/var in USERDATA through the kernel's driver
+devices/starlte/mkimage.sh -s 150 cpus=6 bootcpu=2 ... ufs=3 ufs_write=1 var_hfs=ufs_USERDATA_data ufs_native_verify=1 system_apfs=ufs_SYSTEM
+```
+
+`ufs_native_step=1..4` with `ufs=3` stops own mode at that step and goes on through the loader. What the log says:
+
+| Where | Line |
+|---|---|
+| loader | `ufs: ufs=3: the block service as ufs=2, for the kernel's own driver to check itself against and to fall back to ...` |
+| kernel | `ufs: nufs: ufs=3: this kernel's own UFS driver (exynos9810) takes the controller after a self-test ...` |
+| step 1 | `ufs: nufs: the loader's unit 0 (NAME, N blocks): a GPT; blocks 0..5 read through the loader (fnv ...), and its backup GPT`, then `references through the loader: N unit(s), M partition blocks` |
+| step 2 | own mode's lines (`ufs: own: ...`), ending with each LUN's capacity |
+| step 3 | `ufs: nufs: the loader's unit 0 is LUN 0: blocks 0..5 read both ways, the same`, `... GPT right ...`, `ufs: nufs: self-test passed: ...` |
+| step 4 | `ufs: nufs: fences set: ...`, one `ufs: nufs: protected: EFS LUN 0 blocks ...` per partition, `ufs: nufs: fence test: N writes made and judged, none sent: every one as it should be` |
+| step 5 | `ufs: own: writes may go to LUN 0, blocks 2000768..15615994, and nowhere else` (B only) |
+| switch | `ufs: nufs: step 5: switched: every read ... through this kernel's own driver from now on` |
+| end | `ufs: native: at the end: ...`, `transfer list back to UEFI's ...` |
+
+On any difference instead: `ufs: nufs: ABORTED: <why>`, then `UEFI's list is back as it was: the storage goes through the
+loader for this run (ufs=2)`, and the boot goes on as with `ufs=2`.
+
 ## /private/var kept between runs: USERDATA
 
 Without it `/private/var` is a memory filesystem, empty at every boot (and about 1 GB). With `ufs_write=1
