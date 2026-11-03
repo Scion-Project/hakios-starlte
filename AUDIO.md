@@ -6,7 +6,8 @@ firmware (calliope) and programs the DMA; the speakers are protected by Maxim's 
 stays off ("bypass"): the AP programs everything, and the speakers' guard (`hakios.guard.c`) stands in for DSM. It plays:
 a tone and iOS's sounds, seen on phone 2 on 3 November (below).
 
-Two drivers in the common repository, both built into the S9's kernel and both off until a boot-argument asks:
+Two drivers in the common repository, both built into the S9's kernel and both on by default (`abox=8 max98512=3`,
+README.md, Defaults):
 
 | Driver | Boot-argument | What it does |
 |---|---|---|
@@ -73,7 +74,7 @@ boost's output reading. `abox tone S` makes steps 1-7 again (not while `abox=8` 
 
 The headphones, the jack and the microphones go through the audio codec, a Cirrus Logic CS47L93 (Cirrus's Madera
 family) on SPI: spi@10470000, USI01 of PERIC0, chip select 0. Two more files in the common repository, built into
-this phone's kernel (`configs/starlte.config`) and off until a boot-argument asks:
+this phone's kernel (`configs/starlte.config`) and on by default (`cs47l93=6`, README.md, Defaults):
 
 | Driver | Boot-argument | What it does |
 |---|---|---|

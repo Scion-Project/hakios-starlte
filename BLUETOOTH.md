@@ -47,7 +47,8 @@ The patch's own description, which the driver logs, names the module it is for.
 
 ## First runs
 
-One flash each, with `cpus=2 bootcpu=2` in every run (README.md, The cores), reading the pstore log in TWRP after
+One flash each, with `cpus=2 bootcpu=2` in every run (README.md, The cores) and `mkimage.sh -n` (the arguments below
+alone, without the S9's defaults: README.md, Defaults), reading the pstore log in TWRP after
 each. The driver is off without `bt=`.
 
 | Run | Arguments | What to look for |

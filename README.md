@@ -11,13 +11,25 @@ repository, as the POCO's are: `drivers/core/hakios.exynos_hsi2c.c`, `drivers/in
 `hakios.s6sy761.c`, `drivers/power/hakios.max77705.c`, `drivers/gpu/hakios.s6e3ha8.c` and `hakios.mali.c`/`.cpp`; and so
 are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 
-**State: iOS 16.5 runs on the phone.** Seen on the phone (1 and 2 November 2026): six cores (`cpus=6 bootcpu=2 m3_prep=3
-pan=0`, The cores), touch, the battery's level and charger state, vibration, the kernel's live log and a console over
-USB, the GPU through Mesa's Panfrost (`mali=9`), the A55s' clock through ACPM's DVFS (`cpufreq_lit=1794000`), the
-frame scaled to the panel by the DPP (`fb_dpp=1`), the PMIC's RTC read (`rtc_pmic=1`) and the
-clusters' coherency check (`cohtest=1`: PASS).
-Written but not yet confirmed: brightness from iOS's slider (`backlight=2`). Written but not yet tested on the phone:
-the cameras, speaker audio, Wi-Fi, Bluetooth, temperatures, the flashlight and the kernel's own UFS driver. The
+**State: iOS 16.5 runs on the phone, from its own flash, as a daily-usable system.** Seen working on the phone (1 to
+3 November 2026), and on by default on every image (Defaults, below):
+- six cores, the A55s 2 and 3 and the four M3s (`cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1`; The cores), the
+  clusters' clocks moved by the governor with the load and the touch screen (`cpufreq_gov=1`; CPU clocks);
+- the storage: iOS's system from SYSTEM through the kernel's own UFS driver (`ufs=3`), `/private/var` kept between runs
+  in USERDATA (`ufs_write=1 var_hfs=ufs_USERDATA_data`); the RTC's time of day (`rtc_pmic=1`);
+- touch, the keys, the battery and charger, vibration, the thermal watch, the kernel's live log and a console over USB,
+  the whole log kept for TWRP (`esslog=1`), and every run's return to TWRP;
+- the display: the GPU through Mesa's Panfrost (`mali=9`, its clock after its load, `mali_gov=1`), the frame scaled by
+  the DPP (`fb_dpp=1`) and scanned out of the window server's own surface with nothing copied (`fb_zc=1`), and iOS's
+  brightness slider moving the panel (`backlight=2 brightness_bridge=1`);
+- Wi-Fi: joined from iOS's Settings (WPA2), DHCP, the Internet (`wifi_pcie=6 brcmfmac=8 wifi=1`; WIFI.md);
+- the front camera in the stock Camera app at 30 frames a second (`cam_s9=7 cam=5`; CAMERA.md);
+- the speakers through ABOX and the two MAX98512s, iOS's own sounds (`abox=8 max98512=3`; AUDIO.md); the codec, a
+  CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
+
+Not working yet: the headphones and the recording reaching iOS (the CS47L93 codec's main microphone records), Bluetooth (BLUETOOTH.md: the chip's HCI written,
+no host stack), the sensors (the sensor hub), the modem (docs/modem-plan.md), the rear cameras, the seventh core (core 1,
+which S-Boot parks: The cores) and the low RAM bank (XNU has only the 2 GB bank from 0x880000000: Memory layout). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
@@ -105,8 +117,11 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xAF800000 + 32 MB, 0xB8000000 + 2 MB, 0xC0000000 + 512 KB | `rkp_region`, `tima_region` (disabled), `seclog_mem` | DT |
 | 0xCC000000 + 0x1043000 | the panel's buffer (GOP), reserved | UEFI, DT `s3cfb.bootloaderfb` |
 | **0xD0000000 + 64 MB** | **the payload, moved here at the start** (a step of 64 MB up if that is taken); its last MB the panic log (`pram`) | L `payload_home` |
-| 0xD4000000 to 0xD71E0000 at the most | the display's scan-out buffers (`fb_flip`: two of the panel's size, to 0xD60A0000; `fb_dpp`: three of the display's) | `hakios.exynos_dpu.c` |
-| 0xD8000000 + 8 MB | the front camera's frame and camshot's picture (`cam_s9=4` and up): the WDMA's addresses are 32 bits, so it is here, outside XNU's RAM, mapped through IOKit | `hakios.exynos_camera.c` |
+| 0xD4000000-0xD6FFFFFF | the display's scan-out buffers (`fb_flip`: two of the panel's size, to 0xD60A0000; `fb_dpp`: three of the display's, to 0xD71E0000 at the most of the panel's size) | `hakios.exynos_dpu.c` |
+| 0xD8000000-0xD9FFFFFF | the front camera's ring of four frames, camshot's still and picture (`cam_s9=4` and up): the WDMA's addresses are 32 bits, so it is here, outside XNU's RAM, mapped through IOKit | `hakios.exynos_camera.c` |
+| 0xDA000000-0xDA3FFFFF | UFS's own-mode list, command descriptors and buffers (`ufs=3`; the controller is kept to 32 bits) | `hakios.ufshc.c` |
+| 0xDC000000-0xDEBFFFFF | Wi-Fi's DMA pool, only with `wifi_dma_at=0xDC000000` (off by default: the radio's memory is the kernel's own) | `hakios.lx.c` |
+| 0xDEC00000-0xE18FFFFF | the display's pool for `fb_zc`: three slots of 12 MB, one window-server surface each | `hakios.exynos_dpu.c` |
 | 0xE1900000 + 30 MB | `secure_camera`, reserved | DT, UEFI |
 | 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
 | **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |
@@ -116,6 +131,11 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xFF800000 + 8 MB | `fimc_is_lib`, no-map | DT |
 | 0x880000000 + 2 GB | XNU's RAM: the largest free block (`physBase`, `memSize`); in it the kernel at +48 MB, the ramdisk after it, the device tree (64 KB) and `boot_args` after that | L `choose_window`, `run_kernel` |
 
+The kernel's ranges from 0xD0000000 to 0xE18FFFFF, and the keep-outs above, are one table in the common repository,
+`xnu/files/bsd/sys/hakios.exynos9810_mem.h`, which the display, the camera and UFS take theirs from, with checks at build
+time that no two overlap (until 3 November the display's `fb_zc` pool ran from 0xD7000000 up to `secure_camera`, over the
+camera's, UFS's and Wi-Fi's ranges).
+
 The three ranges in bold from 0xF0000000 to 0xFD9FFFFF are the platform's keep-outs: at the start the loader takes every free
 page of them from UEFI as reserved memory (`keep_out_reserve`), so nothing UEFI hands out while it stays alive beside the kernel
 lands there, and XNU's window is never allowed to cover them. XNU's memory is only `[physBase, physBase + memSize)`, so it never
@@ -124,8 +144,9 @@ has them as free memory.
 ## The cores
 
 Cores 0-3 are Cortex-A55s (MPIDR 0x000-0x003). Cores 4-7 are Exynos M3s (0x100-0x103, 2.7 GHz), which Carbon's PSCI
-starts. The loader numbers them through `platform_starlte.core_mpidr`. The default configuration (`cpus=2 bootcpu=2`) gives
-the kernel A55s 2 and 3, the only cores it can have so far (seen on the phone, 30 October 2026):
+starts. The loader numbers them through `platform_starlte.core_mpidr`. `cpus=2 bootcpu=2` (the SoC's own
+configuration, and what a bare line `mkimage.sh -n` falls back to) gives the kernel A55s 2 and 3; the S9's defaults give it
+six cores (below). Seen on the phone from 30 October 2026:
 
 - core 1: S-Boot powers it up and parks it before the hand-over, so CPU_ON for it never brings it to the kernel (the loader
   leaves it out: `platform_starlte.parked_cores`);
@@ -135,7 +156,7 @@ the kernel A55s 2 and 3, the only cores it can have so far (seen on the phone, 3
 - the A55s' own MPIDR has them one affinity field up (core 2 reads 0x81000200, MT set) from the numbers the device tree and
   the firmware use (0x2); the kernel notices and translates (patch 1504).
 
-Why the M3s' CPU_ON hangs, and what goes first (written, not yet seen). Samsung's kernel, before `smp_init`, runs the
+Why the M3s' CPU_ON hung, and what goes first (`m3_prep=3`: seen working, six cores, 2 November). Samsung's kernel, before `smp_init`, runs the
 PMU's "lpm init" sequence (`pmucal_lpm_init`, from `cal_if_init` in the clock driver's init); six of its entries are the
 big cluster's: `CPU_QCH_CLUSTER1_NONCPU_SYS_PWR_REG` (PMU +0x1088) [31:24] = 0x8D, and `MEMORY_CLUSTER1_CPU0..3_OPTION`
 (+0x2114, +0x2180, +0x21EC, +0x2258) and `MEMORY_CLUSTER1_NONCPU_OPTION` (+0x2384) [1:0] = 2 (BSP
@@ -180,8 +201,9 @@ make unpack IPSW=/path/to/iPhone10,3,iPhone10,6_16.5_20F66_Restore.ipsw   # your
 make starlte_defconfig && make kernel        # the common kernel, no driver of another phone (configs/starlte.config)
 make loader                                  # with the iPhone identity from your own IPSW
 (source ./xnu-env.sh; cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 bash build.sh)   # the small root, the whole root here (ALONE=1)
-devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root
-devices/starlte/mkimage.sh -s 300 cpus=2 bootcpu=2 exynos_keys=1     # the same with other boot-arguments
+devices/starlte/mkimage.sh -s 120            # xnu-starlte.img: the shim, the UEFI, the loader, the kernel, the small root, the defaults
+devices/starlte/mkimage.sh -s 300 fps_log=1 wifi=     # the same, a diagnostic added and Wi-Fi's station dropped from the defaults
+devices/starlte/mkimage.sh -s 300 -n cpus=2 bootcpu=2 # only these arguments, none of the defaults (a first run of something)
 ```
 
 To install iOS on the phone's flash with one TWRP zip, build the system image too (`make images`), then use
@@ -192,6 +214,37 @@ on the POCO (the kernel's own USB link, below, gives the log and a console, not 
 the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built from source, open throughout:
 `prebuilt/README.md`), or from `Mu-Silicium/` when one is built here (`devices/starlte/uefi/apply.sh`, then
 `build_uefi.py -d starlte -r RELEASE`).
+
+## Defaults
+
+What has been seen working on the phone is on by default: every image `mkimage.sh` makes carries the S9's default
+boot-arguments, which are `configs/starlte.config`'s (its last part, "The S9's defaults"; `tools/hakios-config.py args
+--defconfig starlte_defconfig` prints them). No other device's defaults change with them.
+
+```
+cpus=6 bootcpu=2 m3_prep=3 pan=0 isa_floor=1            six cores (The cores)
+exynos_keys=1 max77705=1 panel=1 s6sy761=1              the keys, the battery and charger, the panel, touch
+max77705_usbsw=1 usb_gadget=5                           the USB-C port to the SoC, the log and console over USB
+cpufreq_gov=1 mali=9 mali_gov=1                         the CPU governor (and touch boost), the GPU and its clock
+max77705_haptic=1 tmu=3 esslog=1                        vibration, the thermal stop, the log kept for TWRP
+poster_retry=2 backlight=2 brightness_bridge=1          SpringBoard's poster; iOS's brightness slider to the panel
+ufs=3 system_apfs=ufs_SYSTEM                            the kernel's own UFS driver; iOS's system from SYSTEM
+ufs_write=1 var_hfs=ufs_USERDATA_data                   /private/var kept in USERDATA (a memory filesystem if it holds no HFS Plus)
+fb_dpp=1 fb_zc=1 rtc_pmic=1                             scaling by the DPP, zero-copy scan-out, the RTC's time
+cam_s9=7 cam=5                                          the front camera, for the Camera app
+abox=8 max98512=3 cs47l93=6                             the speakers; the codec and its main microphone
+wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1    Wi-Fi, joined from iOS's Settings
+```
+
+Arguments given to `mkimage.sh` go over them, word by word: `name=value` replaces the default of that name where it
+stands, a name with no default is added, `name=` (nothing after the =) takes a default out, and `-n` leaves all of them
+out. The kernel, the loader and user space each take the first of two words with one name, so a default is replaced,
+never just followed. Diagnostics are never defaults: `fps_log`, `systrace`, the `*_probe`, `*_log` and `*_trace`
+arguments are given for a run. The defaults take 432 characters of the 607 the kernel's line holds; the loader adds
+about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`, `-v`), which leaves some 20 for a run's
+own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
+A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
+`device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it.
 
 ## On the phone
 
@@ -212,14 +265,14 @@ the log in RAM and restarts the phone. The UEFI comes from `prebuilt/` (built fr
    outlasted the watchdog). If the phone hangs or comes back into HakiOS, hold Vol Down + Power until it restarts,
    then at once Vol Up + Bixby + Power for TWRP. Android back: restore the BOOT backup in TWRP.
 
-The default command line (`cpus=2 bootcpu=2 ...`, and `-v` from `mkimage.sh`) runs the kernel on cores 2 and 3 and leaves
-core 0 to the loader, which watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
+The default command line (Defaults, above, and `-v` from `mkimage.sh` unless `-q`) runs the kernel on six cores and leaves
+core 0 to the loader, which serves the flash and watches it: if the kernel hangs, the loader writes its log into the pstore RAM and restarts
 the phone, so a hang leaves something to read. `-v` shows the kernel's log on the screen while it starts.
 
 What to look for, in this order:
 1. HakiOS's logo (the UEFI started).
 2. The loader's banner, with `platform starlte, GICv2` and `CurrentEL=1` (Carbon has EL2).
-3. The kernel's log, `gic: v2 ... cpu 0 is interface 2` (the kernel starts on core 2), `2 of 2 processors are running`.
+3. The kernel's log, `gic: v2 ... cpu 0 is interface 2` (the kernel starts on core 2), `6 of 6 processors are running`.
 4. launchd.
 
 Photograph the screen as well. The loader's `logdump` is a Qualcomm partition, and this phone has none. Instead, the
@@ -267,7 +320,7 @@ root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to S
 partition read through the loader). The small root for it is built with `ALONE=1 RC=rc.launchd`.
 
 
-Silicium's UEFI drives the UFS and stays resident. With `ufs=2` (and the default `cpus=2 bootcpu=2`), the loader keeps core 0 and reads for the kernel, which runs on cores 2 and 3: the same
+Silicium's UEFI drives the UFS and stays resident. With `ufs=2` (or `ufs=3`, the default, until its switch), the loader keeps core 0 and reads for the kernel, which runs on cores 2 and 3: the same
 service the POCO uses (`drivers/storage/hakios.ufs.c`). Every GPT partition becomes `/dev/ufs_NAME`, read-only, and
 `root_apfs=ufs_NAME` mounts iOS's root volume from one.
 
@@ -278,11 +331,11 @@ decides what is lost:
 - `USERDATA`: Android's data is wiped.
 
 List the partitions and their sizes first: `adb shell ls -l /dev/block/by-name`.
-Then: `devices/starlte/mkimage.sh cpus=2 bootcpu=2 exynos_keys=1 ufs=2 root_apfs=ufs_NAME`. Nothing writes to the flash: `ufs_write=1` is for the
+Then: `devices/starlte/mkimage.sh -n cpus=2 bootcpu=2 exynos_keys=1 ufs=2 root_apfs=ufs_NAME`. Nothing writes to the flash: `ufs_write=1` is for the
 POCO's `darwin` partition only, and the loader refuses any other.
 
-**The kernel's own UFS driver** (`drivers/storage/hakios.ufshc.c`, `ufs_native=4 ufs_native_soc=exynos9810`, off by default;
-written, not yet seen on the phone) drives the controller itself instead, with no core kept back for the loader. It does not
+**The kernel's own UFS driver** (`drivers/storage/hakios.ufshc.c`, `ufs_native=4 ufs_native_soc=exynos9810` by hand, or
+through `ufs=3`, the default, below) drives the controller itself instead, with no core kept back for the loader. It does not
 reset or bring up anything: it takes the controller as Silicium's UEFI left it (HS-G3, two lanes), reads back what UEFI set
 up, and gives it back as it was at the end. It goes in steps, `ufs_native_step=N`, 1 by default:
 
@@ -298,14 +351,14 @@ It is read only. `ufs_native_write=NAME` alone makes one partition writable, and
 PARAM, PERSISTENT, STEADY, RADIO or the rest of the boot chain (the list is in `drivers/storage/hakios.ufs.c`), nor a
 boot or write-protected unit; the controller's driver refuses any write outside that partition's blocks again. Leave it
 unset. Without `ufs=2`, the root comes from the image (the small root, `-s`). The first runs, one image each, the log read
-in TWRP after each:
+in TWRP after each (with `-n`, which leaves the defaults' `ufs=3` and the rest out):
 
 ```sh
-devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810                     # step 1
-devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=2   # the link
-devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=3   # NOP OUT
-devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=4   # READ CAPACITY
-devices/starlte/mkimage.sh -s 60 cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=5   # the GPTs, /dev/ufs_*
+devices/starlte/mkimage.sh -s 60 -n cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810                     # step 1
+devices/starlte/mkimage.sh -s 60 -n cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=2   # the link
+devices/starlte/mkimage.sh -s 60 -n cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=3   # NOP OUT
+devices/starlte/mkimage.sh -s 60 -n cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=4   # READ CAPACITY
+devices/starlte/mkimage.sh -s 60 -n cpus=2 bootcpu=2 ufs_native=4 ufs_native_soc=exynos9810 ufs_native_step=5   # the GPTs, /dev/ufs_*
 ```
 
 Each step says what it found (`ufs: own: ...`) and stops with `ufs: own: step N done`; go on only when it says what
@@ -313,10 +366,10 @@ the table above expects.
 
 ### ufs=3: the kernel's own driver, checked against the loader's reads
 
-`ufs=3` (off by default; written, not yet seen on the phone) puts the two together. The loader serves the storage as with
+`ufs=3` (a default; seen working on the phone, kernel PR 155, starlte PR 33) puts the two together. The loader serves the storage as with
 `ufs=2`, and the kernel's own driver takes the controller from it only after it has read the same blocks both ways and
 found them the same. Anything wrong before the switch gives the controller back to UEFI and the run goes on through the
-loader (`ufs=2`). `ufs=2` stays the default and is unchanged. In order, each step said in the log before it is taken:
+loader (`ufs=2`, unchanged). In order, each step said in the log before it is taken:
 
 1. **References through the loader**: every unit's head (protective MBR, GPT header and table: blocks 0-5 of LUN 0 on this
    phone) and its backup GPT, and the first, middle and last block of every partition.
@@ -377,7 +430,9 @@ loader for this run (ufs=2)`, and the boot goes on as with `ufs=2`.
 Without it `/private/var` is a memory filesystem, empty at every boot (and about 1 GB). With `ufs_write=1
 var_hfs=ufs_USERDATA_data` it is HFS Plus in Android's USERDATA, given up for it: all 52 GB, journaled, kept between
 runs. This is the POCO's data volume (`docs/u-boot.md` in the kernel repository, "The data volume") with USERDATA in
-place of the POCO's `darwin`. It is written, and not yet seen on the phone.
+place of the POCO's `darwin`. Seen working on the phone: what iOS keeps in `/private/var`
+is there at the next boot. `ufs_write=1 var_hfs=ufs_USERDATA_data` are defaults; without the volume made (below), init
+falls back to the memory filesystem.
 
 - **Writes go through the loader**, as the reads do (`ufs=2`): the loader calls Silicium's `UfsDxe` `WriteBlocks` on
   core 0. The kernel's own UFS driver (`ufs_native_write=`) is not used: none of its steps has run on the phone yet.
@@ -433,7 +488,7 @@ the system image's job list leaves out `ReportCrash` and `osanalytics` (`userlan
 
 ## Touch
 
-`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, off in the configuration's default arguments, on in the installer's; seen working on the phone, 1 November). Its first run on the phone should go one step at a
+`drivers/input/hakios.s6sy761.c` (`s6sy761=1`, a default; seen working on the phone, 1 November). Its first run on the phone should go one step at a
 time: `s6sy761_steps=1` only reads (the bus's clock divider among other things: if it says the HSI2C's input clock is not
 200 MHz, `s6sy761_ipclk=` corrects the timing); 4 asks the chip its boot status, which should be 0x20 (its firmware
 running, powered as the boot loader left it); 6 is touch. The coordinates are the chip's own range (its panel
@@ -441,14 +496,14 @@ information, else 0-4095 on both axes), spread over the whole panel, which is wh
 
 ## Battery
 
-`drivers/power/hakios.max77705.c` (`max77705=1`, off in the configuration's default arguments, on in the installer's; seen working on the phone, 1 November) reads the MAX77705's fuel gauge (0x36) and charger
+`drivers/power/hakios.max77705.c` (`max77705=1`, a default; seen working on the phone, 1 November) reads the MAX77705's fuel gauge (0x36) and charger
 (0x69) on CMGP's HSI2C every 5 seconds, and hands the charge, voltage, current, capacity, cycles and charger state to
 iOS's power source. It never writes the chip. The temperature is the battery's thermistor (channel 4 of CMGP's ADC,
 through the phone's own table), as Android reads it. Touch and battery share `drivers/core/hakios.exynos_hsi2c.c`.
 
 ## Brightness
 
-`drivers/gpu/hakios.s6e3ha8.c` (`panel=1`, off by default until it has been seen working). The S6E3HA8 has no DCS brightness command, so the driver
+`drivers/gpu/hakios.s6e3ha8.c` (`panel=1`, a default). The S6E3HA8 has no DCS brightness command, so the driver
 sends Samsung's AOR, the part of each frame the pixels are off, through DSIM0's command FIFO. The range runs from
 the boot loader's level down to about 2 % of it; the gamma for the panel's full range is this panel's own and comes
 from Android's boot log (`dmesg | grep 'gamma\['`). `sysctl kern.hakios.brightness=0..255` sets it, and
@@ -466,7 +521,9 @@ changes. Which property iOS sets when its slider moves is not known yet, so ther
   (`AppleARMBacklight: <process> sets ...`), every property asked of it that it lacks (`... asks for ...: not there`)
   and who opens it. `backlight=2` also takes its `brightness` and `linear-brightness` as the panel's brightness.
 
-Written, not yet seen. First run: `backlight=1`, move the slider in Control Center, and read those lines.
+Seen working on the phone: iOS's slider in Control Center and Settings moves the panel's brightness with `backlight=2`
+and the user-space bridge `brightness_bridge=1` (both defaults; kernel PRs 150, 154). `backlight=1` only logs what iOS
+sets, for a new panel.
 
 ## The GPU
 
@@ -474,7 +531,7 @@ Written, not yet seen. First run: `backlight=1`, move the slider in Control Cent
 Infinix Hot 20 ([hakios-mt6768](https://github.com/oosexgang/hakios-mt6768), `redwood_mali.c` and `RedwoodMali.cpp`),
 with MediaTek's power and clocks replaced by the Exynos 9810's, as the mainline Linux port to the S9+ brings the same
 GPU up from S-Boot's state. `mali=N` makes the first N of nine steps, each said in the log before it is made, and
-nothing without it (it is not on the default command line):
+nothing without it (`mali=9` is a default):
 
 | Step | What |
 |---|---|
@@ -514,7 +571,8 @@ next frame while the DECON is sending the last one to the panel, and the panel g
 text that is gone for a refresh while its rows are being rewritten). There is no vsync interrupt: the driver's
 "vsync" is its own timer.
 
-`drivers/gpu/hakios.exynos_dpu.c` (off by default; written, not yet seen) gives the presenter the DECON:
+`drivers/gpu/hakios.exynos_dpu.c` gives the presenter the DECON (`fb_dpp=1` and `fb_zc=1` are defaults, seen working on the
+phone from 2 and 3 November; kernel PRs 145, 160):
 
 - `fb_flip=1`: three buffers of the panel's size (the boot one and two more, below 4 GB: see the first run below); a frame is drawn
   into one that is neither shown nor waiting, then its address goes to the channel's IDMA and a shadow update is asked
@@ -565,12 +623,12 @@ or lost, and drawing took 10-15 ms of every 100. Nothing of fb_dpp ran in it.
 `max77705_haptic=1` gives iOS the vibration motor: the MAX77705's haptic block (the same chip as the charger: two of
 its registers written, in their haptic bits only, each read back) driven by channel 1 of the SoC's PWM, as Samsung's
 driver drives it. `torch=1` looks at the S2MPB02's flash block, `torch=3` gives iOS the flashlight (lit by a pin, so a
-restart puts it out; never above Android's 60 mA). Both are off on the configuration's default command line. The vibration
-has been felt on the phone (1 November, on in the installer's arguments); the flashlight is written, not yet seen.
+restart puts it out; never above Android's 60 mA). The vibration is a default, felt on the phone (1 November); the
+flashlight is not: written, not yet seen.
 
 ## The cameras
 
-`drivers/camera/hakios.exynos_camera.c` (`cam_s9=N`, built in, off by default) is stages 1 to 3 of the front camera,
+`drivers/camera/hakios.exynos_camera.c` (`cam_s9=N`; `cam_s9=7 cam=5` a default) is the front camera,
 the S5K3H1: `cam_s9=1` looks (the S2MPB02's camera LDOs, CIS_CLK1, the pins), `cam_s9=2` powers the sensor up in
 Android's order (three LDOs of the S2MPB02 at Android's voltages, reset, MCLK at 26 MHz), reads its model ID over I2C
 (0x35 on USI08_I2C of PERIC1) and powers it down. `cam_s9=3` switches the ISPPRE power domain on (with the DTZPC
@@ -578,20 +636,24 @@ restore SMC, as the GPU's) and reads CSIS1 and the SysMMU; `cam_s9=4` has the CS
 one frame through CSIS1's VC0 DMA into a buffer below 4 GB (0xD8000000) and logs its checksum; `cam_s9=5` streams the sensor at
 1632 x 1224 RAW10 on two lanes and keeps one frame, with the mean of a patch to tell a picture from black; `cam_s9=6`
 does that and then answers the USB console's `camshot [N]` (`tools/usb-shot.py --cam -o cam.png`): one frame each time,
-debayered on the processor and sent as a picture, or the CSIS's and the WDMA's registers when it fails. Written, not
-yet run. [CAMERA.md](CAMERA.md) has the hardware of both cameras, the steps' expected lines and the rest of the plan:
-the `/dev/hakios-camera` that iOS's capture stack already reads on the POCO.
+debayered on the processor and sent as a picture, or the CSIS's and the WDMA's registers when it fails; `cam_s9=7`
+streams the sensor into a ring of four frames, `/dev/hakios-camera`, which the stock Camera app's preview shows at 30
+frames a second with `cam=5` (run cn3-7, 3 November; kernel PRs 159, 162). Each step seen on the phone (camshot run C6,
+2 November). The rear cameras are not started. [CAMERA.md](CAMERA.md) has the hardware of both cameras, the steps'
+expected lines and how iOS's camera stack is fed.
 
-## Wi-Fi, stage 1
+## Wi-Fi
 
-`drivers/wifi/hakios.exynos_pcie.c` (`wifi_pcie=N`, built in, off by default): the Exynos 9810's PCIe root complex of
+Seen working on the phone (3 November, kernel PR 157): joined from iOS's Settings (WPA2), DHCP from configd, the
+Internet; `wifi_pcie=6 brcmfmac=8 brcmfmac_poll=1 brcmfmac_tcm_idx=1 wifi=1` are defaults. [WIFI.md](WIFI.md) has
+every run. Stage 1, `drivers/wifi/hakios.exynos_pcie.c` (`wifi_pcie=N`): the Exynos 9810's PCIe root complex of
 channel 0 and the BCM4361 behind it, as far as the link and the chip's identity. 1 only looks (the PHY's isolation in the
 PMU, CMU_FSYS1's gates, the pins), 2 powers the radio (WLAN_REG_ON, gpg0-5, 200 ms), 3 brings the PHY up, 4 trains the
 link, 5 reads the endpoint's ID (Broadcom 14e4:441f expected) and sizes and places its BARs. No firmware is loaded.
 Go up one step a run: `mkimage.sh -s 60 cpus=2 bootcpu=2 wifi_pcie=1`, and so on; every line starts with `exynos_pcie:`.
-[WIFI.md](WIFI.md) has the steps and what each should print. Written, not yet run.
+[WIFI.md](WIFI.md) has the steps and what each should print.
 
-Stage 2 (`drivers/wifi/hakios.brcmfmac.c`, `wifi_pcie=6 brcmfmac=N`, built in, off by default): Linux's brcmfmac
+Stage 2 (`drivers/wifi/hakios.brcmfmac.c`, `wifi_pcie=6 brcmfmac=N`): Linux's brcmfmac
 (ISC) on the Linux layer the POCO's ath11k runs on, its object made by `tools/mk-brcmfmac.sh` before the kernel is
 built. 6 hands the device on; then `brcmfmac=1` reads the chip's ID through BAR0, 2 reads which module it is from its OTP
 and asks for the firmware, NVRAM (the module's) and CLM (`firmware/wifi/` of this repository in `fw/`, or the phone's own
@@ -601,13 +663,13 @@ a thread that looks (`brcmfmac_poll=1` keeps the thread), 6 gives the firmware t
 the phone's `/efs/wifi/.mac.info`), 7 is the station: the interface up, en0 on it, iOS's Wi-Fi settings scan through it,
 and 8 joins: an open network or WPA2 with a passphrase (the four-way handshake by the kernel's own `lx_wpa.c`, as on the
 POCO), and the network of `fw-wifi/network` at once if there is one. On the way back to the loader the driver is taken
-down and the radio unpowered (WLAN_REG_ON low). Written, not yet run. iOS's Settings reach it through the kernel's
+down and the radio unpowered (WLAN_REG_ON low). iOS's Settings reach it through the kernel's
 Apple80211 surface, as on the POCO; nothing in user space changes (WIFI.md, "iOS's side"). The first image to run is
 `wifi-a` (WIFI.md, "The plan on the phone": `wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`, stages a to c in one run).
 
 ## Speaker audio
 
-Two drivers, both built in and off until asked: `abox=N` (`drivers/audio/hakios.exynos_abox.c`, 8 steps) is the SoC's
+Two drivers, both on by default (`abox=8 max98512=3`): `abox=N` (`drivers/audio/hakios.exynos_abox.c`, 8 steps) is the SoC's
 side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS1 -> UAIF1, I2S at 48 kHz, 2 x 16 bits; `max98512=N`
 (`drivers/audio/hakios.max98512.c`, 3 steps) is the two amplifiers on I2C. Step 8 of ABOX makes it the sink of
 `/dev/hakios-audio`, the same way in for iOS's sound as on the POCO, with iOS's volume and mute followed.
@@ -615,15 +677,16 @@ side, ABOX with its own CPU off: memory -> RDMA0 -> SIFS1 -> UAIF1, I2S at 48 kH
 It plays (phone 2, 3 November): ABOX's DMA runs without its firmware at 192000 bytes a second, `abox=7 max98512=3`
 plays a 1 kHz tone through both amplifiers, and with `abox=8 max98512=3` iOS's own sounds come through (frames from iOS,
 none lost, the amplifiers on while they play). Nobody has listened yet: the proof is the DMA's rate, the guard's peaks
-and the amplifiers' registers ([AUDIO.md](AUDIO.md), with how to hear it). Add `abox=8 max98512=3` to an image's
-arguments for sound; `abox` on the USB console says the state and `abox tone 3` plays the tone again (with `abox=7`).
-Headphones and the microphones are the CS47L93 codec's, on SPI: not started.
+and the amplifiers' registers ([AUDIO.md](AUDIO.md), with how to hear it). `abox` on the USB console says the state and `abox tone 3` plays the tone again (with `abox=7`).
+The codec, a CS47L93 on SPI (`cs47l93=6`, a default; `drivers/audio/hakios.cs47l93.c` on `drivers/core/hakios.exynos_spi.c`):
+its ID, power, FLL and main microphone, recorded through UAIF0 -> WDMA1 by the console's `abox rec S` (phone 1,
+3 November; [AUDIO.md](AUDIO.md), "The codec"). The headphones and the recording reaching iOS are not done yet.
 
 ## Temperatures
 
 Android keeps the S9 cool with Linux's thermal framework and Samsung's APM firmware: the big cores slowed from 83
 degrees and taken away at 96, the GPU slowed from 88, every zone's "hot" trip at 115. HakiOS has none of that, so
-`drivers/power/hakios.exynos_tmu.c` (`tmu=N`, built in, off by default) at least watches. It reads the Exynos 9810's TMU
+`drivers/power/hakios.exynos_tmu.c` (`tmu=N`; `tmu=3` a default) at least watches. It reads the Exynos 9810's TMU
 itself: TMU_TOP at 0x10070000 (BIG: sensors 1, 2, 3, 4, 6; LITTLE: 5) and TMU_SUB at 0x10074000 (G3D: 1; ISP: 2), each
 sensor's 9-bit code made degrees with its own fuses (TRIMINFO: the codes at 25 and 85 degrees), the arithmetic of the
 BSP's `exynos_tmu.c` (checked on the host: `tools/exynos-tmu-test.sh`). `tmu=1` only reads (the TMU's clock gate in
@@ -634,14 +697,15 @@ reads `tmu_stop` (110, five under Android's hot trip) or the battery `tmu_batt_s
 "TOO HOT" in the log, then back to the loader, which stops every core and restarts into TWRP with the log kept. With
 `tmu_off=1` and no charger it powers the phone off instead (PS_HOLD low, as Samsung's power-off does; the log is lost).
 Nothing slows anything down: the stop is the whole protection. If S-Boot leaves the TMU stopped, `tmu_enable=1` starts
-it the way Android does, but never arms its hardware trip. Written, not yet run.
+it the way Android does, but never arms its hardware trip. Running on the phone since 1 November (the zones read); its
+stop at 110 C has not been reached there.
 
 ## The clock
 
 The time of day was the moment the image was made: `mkimage.sh` puts `epoch=$(date +%s)` on the command line and the
 kernel's calendar starts there on every boot (iOS showed 2:11 at 08:49 UTC). The phone has a real-time clock that keeps
-running while it is off, the RTC block of the S2MPS18 PMIC, and `drivers/power/hakios.s2mps18_rtc.c` (`rtc_pmic=1`, built
-in, off by default) reads it once, when the kernel first asks for the time of day. It only reads: the PMIC is on SPEEDY,
+running while it is off, the RTC block of the S2MPS18 PMIC, and `drivers/power/hakios.s2mps18_rtc.c` (`rtc_pmic=1`, a
+default; its read seen working on the phone, 2 November) reads it once, when the kernel first asks for the time of day. It only reads: the PMIC is on SPEEDY,
 which the APM owns, and its registers are asked for through ACPM (channel 2, block 2, the path the GPU and touch drivers
 take), CTRL to YEAR (0x00-0x0B), never written. Binary, 24-hour, the year since 2000, Linux's own test for a reset clock
 (CTRL bit 1 and CAPSEL[7:4] = 0xF), from Samsung's `rtc-s2mps18.c` and `rtc-s2mp.h`. What it reads is what S-Boot last
@@ -658,7 +722,7 @@ is the step after this one.
 
 The clusters' rates go through the APM's ACPM firmware (DVFS domain 2 is the A55s, cpucl0; 3 the M3s, cpucl1). A request
 names a rate, never a voltage: the APM keeps each level's voltage (the ASV's, set at boot) and applies it with the rate,
-as it does for Samsung's kernel, which only reads that table (`cal-if/fvmap.c`). Two ways to use it, both off by default:
+as it does for Samsung's kernel, which only reads that table (`cal-if/fvmap.c`). Two ways to use it, the governor a default:
 fixed rates (`cpufreq_lit=`, `cpufreq_big=`, `drivers/core/hakios.exynos_acpm.c`), or `cpufreq_gov=1`,
 `drivers/power/hakios.exynos_cpufreq.c`, which moves both with the load and the heat, and then the fixed ones are not used.
 
@@ -678,7 +742,7 @@ core of each cluster sets its rate (75% busy wanted; up at once, down after thre
 `tmu=2` or more, a cluster at its zone's control point (83 C BIG, 76 C LITTLE, Samsung's) loses a level of its ceiling a
 second, gets it back 5 degrees under, and goes to its lowest level at 96 (BIG's hotplug_out); without them the M3s stay
 at 1794000 or under. Once a second a line "cpufreq_gov: N s: lit ... MHz load ...% ... | big ... | temp big ... lit ... C"
-goes to the loader's log. Written, not yet run.
+goes to the loader's log. Run on the phone, with the touch and frame boosts (kernel PRs 147, 152, 158).
 
 ## Powering off
 
@@ -699,7 +763,7 @@ whether PS_HOLD alone powers the S9 off while the APM still runs (Samsung never 
 ## USB: the whole log and a console over the cable
 
 pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
-hakios.exynos_usb.c; built in, off by default) makes the phone's USB-C port a USB serial device instead: the kernel's
+hakios.exynos_usb.c; `usb_gadget=5` a default) makes the phone's USB-C port a USB serial device instead: the kernel's
 log from its first line, live, for as long as the run lasts, the panic text at the end, and a line console back. It is
 the DWC3 at 0x10C00000 in device mode, high speed, with a CDC-ACM function (pid.codes' test ID 1209:0001, "HakiOS kernel
 log and console"): `/dev/ttyACM0` on Linux, `/dev/cu.usbmodem*` on a Mac. The PHY is brought up with the BSP's USB 3.1
@@ -736,14 +800,15 @@ its file going) sends `shot 4` and writes the picture as a PNG: 360x740 from the
 
 Each driver is written from the BSP's facts. Those seen working since (touch, the battery, vibration, USB, the
 GPU, the M3s: runs 3-7, 18-24 and 26-29) are kept here as the record of their bring-up. Bring the rest up one at a time, each
-step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 cpus=2 bootcpu=2
-<args>`). Note that `mkimage.sh` given any arguments uses those alone, in place of the configuration's (`cpus=2
-bootcpu=2`): keep those two in every run, as the column below leaves them out.
+step on its own flash, reading the pstore log in TWRP after each (`devices/starlte/mkimage.sh -s 120 -n cpus=2 bootcpu=2
+<args>`). The runs below were written for a line of their own arguments alone: since the S9's defaults (Defaults, above),
+`mkimage.sh` puts its arguments over the defaults, so give these with `-n` to run them as written (and keep `cpus=2
+bootcpu=2` in each, as the column below leaves them out), or without `-n` to try one driver beside everything that works.
 
 | Run | Arguments | What to look for |
 |---|---|---|
 | 1 | none of the drivers | the loader's banner, "2 of 2 processors are running" |
-| 2 | `exynos_keys=1` | "exynos-keys: power: bank 0x60 pin 4, CON f (interrupt), released", then down/up on presses |
+| 2 | `exynos_keys=1` | "exynos_keys: power: bank 0x60 pin 4, CON f (interrupt), released", then down/up on presses |
 | 3 | `s6sy761=1 s6sy761_steps=1` | "USI mode 4 ... divider ...": if the divider is not 1 on a 400 MHz branch, add `s6sy761_ipclk=` |
 | 4 | `s6sy761=1 s6sy761_steps=4 s6sy761_ldo=0` | "boot status 20 (its firmware runs)" and "panel: 1440 x 2960 ..."; with no answer, again without `s6sy761_ldo=0` |
 | 5 | `s6sy761=1` | "step 6: watching the IRQ pin", then touches |
@@ -787,11 +852,13 @@ The HSI2C core has no bus recovery: a chip that holds SDA low makes every transf
 
 | Step | How |
 |---|---|
-| iOS's brightness slider | a run with `backlight=1` (above) says which key the slider sends; then make it the one taken (`backlight=2`, or the display service's key) |
 | Speaker audio | plays (runs 10-12); to hear it, and the speakers' order (top/bottom, left/right) by ear; the mixer's way (SIFS0) and the amplifiers' current/voltage sense back over UAIF1 for a measured proof ([AUDIO.md](AUDIO.md)) |
-| Headphones, microphones | the CS47L93 on SPI (spi@10470000): an SPI driver, its supplies and reset, then the codec's ID, its FLL and UAIF0 ([AUDIO.md](AUDIO.md), "What is left") |
+| Headphones, microphones | the CS47L93 records its main microphone (`cs47l93=6`); next OUT2 and Cirrus's headphone sequence, the jack's microphone, and the recording to iOS (an input side for `/dev/hakios-audio`) ([AUDIO.md](AUDIO.md), "The codec") |
 | Bluetooth | stage 1 (power, the UART, HCI_Reset, the patch) is written: `bt=1..6`, run 17 above ([BLUETOOTH.md](BLUETOOTH.md)); stage 2, iOS's side, needs research into what `bluetoothd` opens first |
-| Wi-Fi | stage 1 (the link) and stage 2 (brcmfmac, the module from OTP, the files from `fw/` or VENDOR, INTx, the phone's address, the station, joining) are written: image `wifi-a` (`wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`) first, then `brcmfmac=8` ([WIFI.md](WIFI.md), "The plan on the phone"); not yet run |
+| Wi-Fi | works (joined from Settings, DHCP, the Internet); next: roaming, power saving ([WIFI.md](WIFI.md)) |
 | A longer log | USB works (`usb_gadget=5`, runs 18-22 above); a partition of the phone's would keep one without a host |
-| Storage, writing | /private/var kept in USERDATA is written (above); first runs, then an image with ReportCrash allowed for crash reports |
+| Storage, writing | /private/var kept in USERDATA works (above); next an image with ReportCrash allowed for crash reports |
 | The M3s | six cores run (`cpus=6 bootcpu=2 m3_prep=3 pan=0`); booting on an M3 (`bootcpu=4`) has not been tried |
+| The seventh core | core 1, which S-Boot parks before the hand-over (The cores): not reached yet |
+| The low RAM bank | XNU has the 2 GB bank from 0x880000000; the 2 GB bank below 4 GB (less its reserved ranges and the carve-outs, Memory layout) is not given to it |
+| Sensors, the modem, the rear cameras | the sensor hub, the Shannon CP ([docs/modem-plan.md](docs/modem-plan.md)) and the rear cameras are not started |
