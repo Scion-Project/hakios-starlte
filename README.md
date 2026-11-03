@@ -675,6 +675,22 @@ second, gets it back 5 degrees under, and goes to its lowest level at 96 (BIG's 
 at 1794000 or under. Once a second a line "cpufreq_gov: N s: lit ... MHz load ...% ... | big ... | temp big ... lit ... C"
 goes to the loader's log. Written, not yet run.
 
+## Powering off
+
+A halt (iOS's "slide to power off", or `halt` at the console) used to hand the phone back to the loader and no more:
+nothing let the PMIC's rails go, and the panel, an S6E3HA8 in MIPI command mode, keeps a copy of the last frame in its
+own memory and goes on showing it with nothing sending it anything, so the phone looked frozen on the last spinner
+frame. `halt_off=N` (`drivers/power/hakios.exynos_poweroff.c`, built in, off by default) makes a halt a power-off.
+`halt_off=1` saves the data volume, blanks the panel through DSIM0's command FIFO (DCS display-off, 0x28, and sleep-in,
+0x10, each between the level-1 key, as Samsung's display-off and exit sequences send them, then their 100 ms), then
+lets go of PS_HOLD (the PMU's PS_HOLD_CONTROL at 0x14060000 +0x330C, bit 8), as Samsung's `sec_power_off()` does: the
+phone is off and the log is lost with it. `halt_off=2` first asks the APM to stop as well (ACPM's STOP request on the
+acpm node's channel 4, Samsung's `acpm_enter_wfi()`, which `exynos_acpm_reboot()` sends before every PS_HOLD). With a
+charger reported by the battery driver, or the phone still running a second after PS_HOLD (a charger it did not see,
+the power key still held), the halt goes the loader's way as before, the panel already dark: TWRP, with the log. The
+same PS_HOLD is `tmu_off=1`'s (Temperatures, above). Without `halt_off`, a halt is what it was. Written, not yet run;
+whether PS_HOLD alone powers the S9 off while the APM still runs (Samsung never tries it) is what runs 33 and 34 tell.
+
 ## USB: the whole log and a console over the cable
 
 pstore holds 32 KB, read in TWRP after the run. `usb_gadget=N` (drivers/core/hakios.dwc3.c with the Exynos 9810's glue
@@ -756,6 +772,8 @@ bootcpu=2`): keep those two in every run, as the column below leaves them out.
 | 30 | run 29's arguments and `cohtest=1` | 30 s after start-up: a "cohtest: cpu N ...: A55" (or "M3") line for each processor with its MPIDR and MIDR, "cohtest: 2 A55s and 4 M3s: every pair, both ways", the first pair's steps 0 to 7c each "0 of 128 lines wrong: ok" (step 1: "100000 of 100000 rounds, 0 stale ... 0 stuck"), a line "A55 0 -> M3 2: 9 of 9 checks passed: ok" for each of the 16 directions, then "cohtest: summary: PASS: COHERENT" or "summary: FAIL: NOT COHERENT: n of 16 directions failed" (the head of hakios.exynos_m3.c says how to read which). `cohtest=3` runs it three times, 30 s apart, while the screen draws. (Its first version took MPIDR's Aff1 for the cluster and said "no A55" with six cores: the A55s number themselves in Aff1) |
 | 31 | `rtc_pmic=1` | "rtc: CTRL 0x02 ... YEAR 0x..", "rtc: the clock says YYYY-MM-DD hh:mm:ss ...", then "rtc: using the clock: ..." or "rtc: not used (why)" (The clock, above) |
 | 32 | run 29's arguments and `tmu=3 cpufreq_gov=1` | "acpm: fvmap: plugin N \"...\"" and "cpufreq_gov: big: the APM's table (DVFS 3), kHz/uV: ..." (or "the device tree's 21 levels"), "cpufreq_gov: big (DVFS 3): 650000 to 1794000 kHz, now N kHz", then a "cpufreq_gov: N s: ..." line a second, the rates moving with the load and never above the "max" they show (CPU clocks, above) |
+| 33 | `halt_off=1`, no charger in, then power off from iOS (or `halt` at the console) | the screen goes black and the phone is off: the power key starts it again into BOOT, not TWRP; if it lands in TWRP instead, the log ends with "halt_off: 3: still running a second after PS_HOLD" or "a charger is attached" (Powering off, above) |
+| 34 | `halt_off=2`, the same | the same, after "halt_off: 2: the APM asked to stop ... answered (0)"; run it if run 33 stays on |
 
 The HSI2C core has no bus recovery: a chip that holds SDA low makes every transfer time out after 1 s. With
 `max77705_haptic=1` the MAX77705 driver writes two registers (haptic bits only, read back); without it, it only reads.
