@@ -123,11 +123,13 @@ where each value comes from (DT: Samsung's device tree, `reserved-memory`; UEFI:
 | 0xCC000000 + 0x1043000 | the panel's buffer (GOP), reserved | UEFI, DT `s3cfb.bootloaderfb` |
 | **0xD0000000 + 64 MB** | **the payload, moved here at the start** (a step of 64 MB up if that is taken); its last MB the panic log (`pram`) | L `payload_home` |
 | 0xD4000000-0xD6FFFFFF | the display's scan-out buffers (`fb_flip`: two of the panel's size, to 0xD60A0000; `fb_dpp`: three of the display's, to 0xD71E0000 at the most of the panel's size) | `hakios.exynos_dpu.c` |
+| 0xD7000000-0xD7FFFFFF | the display's pool for `fb_zc`, its first part: one slot | `hakios.exynos_dpu.c` |
 | 0xD8000000-0xD9FFFFFF | the front camera's ring of four frames, camshot's still and picture (`cam_s9=4` and up): the WDMA's addresses are 32 bits, so it is here, outside XNU's RAM, mapped through IOKit | `hakios.exynos_camera.c` |
+| 0xD8000000-0xD8FFFFFF | also the iris camera's raw frame (2400 x 2400 RAW8) and irshot's picture (`iris_s9=4` and up): never with the front camera | `hakios.exynos_iris.c` |
 | 0xDA000000-0xDA3FFFFF | UFS's own-mode list, command descriptors and buffers (`ufs=3`; the controller is kept to 32 bits) | `hakios.ufshc.c` |
-| 0xDA400000-0xDB3FFFFF | the iris camera's raw frame (2400 x 2400 RAW8) and irshot's picture (`iris_s9=4` and up) | `hakios.exynos_iris.c` |
+| 0xDA400000-0xDBFFFFFF | the display's pool for `fb_zc`, its second part: two slots of 12 MB | `hakios.exynos_dpu.c` |
 | 0xDC000000-0xDEBFFFFF | Wi-Fi's DMA pool, only with `wifi_dma_at=0xDC000000` (off by default: the radio's memory is the kernel's own) | `hakios.lx.c` |
-| 0xDEC00000-0xE18FFFFF | the display's pool for `fb_zc`: three slots of 12 MB, one window-server surface each | `hakios.exynos_dpu.c` |
+| 0xDEC00000-0xDFFFFFFF | the display's pool for `fb_zc`, its third part: one slot (with 0xD7000000's and 0xDA400000's, four; nothing the display scans out is at or above 0xE0000000) | `hakios.exynos_dpu.c` |
 | 0xE1900000 + 30 MB | `secure_camera`, reserved | DT, UEFI |
 | 0xF0000000 + 64 MB | where the shim puts the payload and the boot manager finds `loader.efi`; reserved in UEFI | UEFI, hakios-uefi `XnuLoader.h` |
 | **0xF0000000-0xF91FFFFF** | **`modem_if`, the CP's memory** (its window fixed by EL3 at cold boot) | DT |

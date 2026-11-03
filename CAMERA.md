@@ -162,7 +162,7 @@ if it is sheared, `cam_s9_stride=` (the "bytes written" over 1224); a "camshot f
 
 ## The iris camera
 
-`drivers/camera/hakios.exynos_iris.c` (`iris_s9=N`, CONFIG_HAKIOS_EXYNOS_IRIS; off unless asked). Written, not yet seen.
+`drivers/camera/hakios.exynos_iris.c` (`iris_s9=N`, CONFIG_HAKIOS_EXYNOS_IRIS; off unless asked). The sensor answers with `iris_s9_smc=1`; no frame has reached memory yet.
 Its head has every register and number and where each comes from (the BSP's fimc-is-device-module-5f1.c,
 leds-s2mpb02.c, the device tree; GPL, read for facts only).
 
@@ -194,6 +194,25 @@ taken out with `cam_s9=`). Running both is the next step: one owner of the S2MPB
 | I3 | `cam_s9= iris_s9=3` | after I2's, the FLED registers again: CTRL2 0x38, CUR2 0xaf, TIME2 bit 0, IRON1 0x19, IRON2 0xb, IRD1 0, IRD2 0x2e |
 | I4 | `cam_s9= iris_s9=4` | "read back: output 2400 x 2400, frame 5079 lines of 2616 clocks"; "CSIS3 version 0x..."; "STREAM ON"; "streamed N ms; a whole frame"; "the frame: about 5760000 of 5760000 bytes changed"; the middle patch's mean (an eye or a hand at 25-35 cm: well above black) |
 | I5 | `cam_s9= iris_s9=5 usb_gadget=5` | after I4's, "5: ready for the USB console's irshot"; on the host `tools/usb-shot.py --iris -o iris.png`: a grey 1200 x 1200 infrared picture |
+
+What the phone has shown (3 November, phone 1, one kernel, Wi-Fi's arguments taken out for the line's length):
+
+| Run | Arguments | Seen |
+|---|---|---|
+| control | `cam_s9= iris_s9=2` | the LDOs on as expected; "the sensor does not answer at 0x10" |
+| PREPARE | `cam_s9= iris_s9=2 iris_s9_smc=1` | PREPARE returns 0; model ID 0x5061 (not the "5f1." the table above expected), version 0xa1, OTP test 1 1 1; UNPREPARE returns 0 |
+| frame | `cam_s9= iris_s9=4 iris_s9_smc=1` | "streamed 164 ms; a whole frame", CSIS3 FRM_CNT 6, ERR_CODE 0, and 0 of 5760000 bytes changed: the buffer still holds its 0xA5 |
+| bright | `iris_s9=5 iris_s9_smc=1 iris_s9_exp=2000 iris_s9_gain=0x100` | CSIS3 FRM_CNT 23, "NO FRAME END seen", 0 bytes changed, so no irshot |
+
+So PREPARE is what lets the sensor answer, and the secure world is reached through Carbon. The pins' registers read the
+same before and after it, so their read-back is no test of anything. Why nothing lands in memory is not known: the
+secure path taking the frame is the first guess, unproved. Not run: `iris_s9_smc=2` and `3`. Next: PREPARE, power up,
+UNPREPARE, then stream, to see whether the sensor stays up and the path is left in the normal world. No run has shown a
+picture, and whether the IR LED pulsed was not observed.
+
+The fingerprint's bus (`fp_s9=N`, the same file). Reading SPI1 (spi@10450000) is a synchronous external abort with its
+clock gates open, and so is the mode word at SYSREG_PERIC0; the kernel panics and the phone returns to TWRP. So they
+are not the normal world's. The sensor itself was never reached.
 
 If I2 says the sensor does not answer, the LDOs' read-back and `look_pins` say which part of the power-up is missing.
 If I4 has no frame end, the CSIS's INT_SRC0 says whether the link saw start-of-transmission (SOT) or CRC errors (the
