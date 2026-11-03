@@ -72,28 +72,63 @@ The chip's address is Broadcom's default (43:61:b2:...), not the phone's own: Sa
 
 ## iOS
 
-What iOS 16.5's `bluetoothd` (the iPhone X build this port runs) wants, read from the binary and seen on the phone:
+On the phone (3 November 2026, phone 2): with kernel bt=7 and a userland built with `BT=1`, Settings > Bluetooth shows
+the switch **on** and its "Devices" list scanning; `bluetoothd`'s stack is up ("Stack: STACK_BUSY -> STACK_READY",
+"Stack did start"), it runs passive LE scans and classic inquiries of 4 x 1.28 s while Settings is open, and it hears LE
+advertisements (Apple's proximity-pairing ones among them). The list stayed empty: there was no discoverable BR/EDR
+device near the phone (the kernel's own `bt scan` found 0 BR/EDR and 21 LE devices in the same place), and Settings
+lists classic devices and Apple's own accessories, not every LE advertiser. The name it is discoverable by is "(null)":
+the device has no user-assigned name yet.
 
-1. **A serial port**: `/dev/cu.bluetooth` or `/dev/uart.bluetooth` (it tries both). The kernel makes both, and
-   `/dev/tty.bluetooth`, at bt=7: one tty of XNU's own (termios, select), its output to UART_BT and the chip's bytes
-   into it; a speed set with `tcsetattr()` is set on the UART too.
-2. **The transport**: the environment variable `BT_HCI_TRANSPORT` (H4, H4DS, H4BC, H5, USB, APPLEBT, PCIE); else a plist.
-3. **An address**: a service named `marconi-bt` or `bluetooth` with `local-mac-address`
-   (`IORegistryEntrySearchCFProperty` from it, the device tree plane). Without one: "Not a valid MAC address (all 00s)",
-   "No bluetooth on this device.", exit. `BT_DEVICE_ADDRESS` is read and then zeroed in this build (an internal
-   feature compiled out). The kernel's `hakios.bt_node.cpp` makes the service with the chip's address; then:
-   "bluetooth: Got local-mac-address: 43:61:b2:00:1f:ac", "Server attached, going into msg loop."
-4. **BlueTool**, which `bluetoothd` asks over XPC (`com.apple.BlueTool`, `RunBuiltinScript` "boot") to boot the chip
-   before it opens the port. Here it stops: BlueTool says "Device not open yet, use 'device' to open it." and exits 1
-   after 31 s, again and again, without asking for any `/etc/bluetool/<HW model>.boot.script` (an interposer put into it
-   to send those paths to the small image saw no such request). Its default device comes from IOKit
-   (`com.apple.uart.bluetooth`) or `BT_UART`; what it decides from the platform and the chip before that is the next
-   thing to read out of it. The way round it that `bluetoothd` itself has, the preference `BlueToolBTResult`
-   (`HWRepair`), is read behind a check that looks like an internal-build one.
+What it took, read from the iPhone X build of iOS 16.5 (`bluetoothd`, `BlueTool`) and checked on the phone:
 
-So in Settings Bluetooth is not on yet: `bluetoothd` runs and waits for BlueTool's boot. The launchd job of
-`bluetoothd` is not in the default job list (`userland/mkjobs.py` DENY has "bluetooth"); the runs above used a small
-image with it added (and `BT_HCI_TRANSPORT=H4`, `BT_BAUDRATE=4000000`).
+1. **BlueTool's UART is a kernel control, not a /dev node.** `bluetoothd` boots the chip by asking BlueTool over XPC
+   (`com.apple.BlueTool`) to run its "boot" script and then its "init" script; it starts its stack only when both have
+   returned 0. BlueTool's `device -D` (or `device -d NAME`) makes a `PF_SYSTEM` stream socket, looks up the kernel
+   control `com.apple.uart.bluetooth` (or `$BT_UART`) with `CTLIOCGINFO`, connects, reads and sets termios with
+   get/setsockopt (`SYSPROTO_CONTROL`, options `TIOCGETA`/`TIOCSETA`) and then reads and writes H4. With no such
+   control every command that needs the chip says "Device not open yet, use 'device' to open it." -- which is why
+   `BT_UART=/dev/cu.bluetooth` could not help. The kernel now registers that control at bt=7 (`hakios.bcm4361_bt.c`):
+   the same UART as `/dev/cu.bluetooth`, one client at a time, the newest taking it (BlueTool keeps its socket after its
+   scripts); the rate is the kernel's (4 Mbaud, the chip already raised to it), a rate set through termios is answered
+   and not followed. Its transport BlueTool takes from the "bluetooth" registry entry: `transport-encoding` 6 is
+   AppleBT, 7 PCIe, anything else (8 when there is none, as here) a UART; `device -D -S` opens it at `transport-speed`
+   (4000000, from `hakios.bt_node.cpp`) unless `BT_BAUDRATE` says otherwise.
+2. **BlueTool's choice of script.** In `runCommandForCurrentConfig` it takes the platform (MobileGestalt's
+   `ProductHash`: fd079b298144a7deb4d7c87fef3eb474d8f0e7eb here), the chip (on a UART, from the chip's own Read Local
+   Version: LMP subversion 0x4309 is in none of its tables, so "BCM") and the module's maker (`WifiVendor`: none, so
+   "ALL"), and looks them up in its built-in list of Apple's modules (BCM4350 to BCM4388, Murata, USI, ...), whose
+   boot sequences load Apple's firmware. Nothing in that list fits this phone, and nothing in it should run on it: the
+   kernel has powered, patched and raised the chip already. Only when `ReleaseType` is "Vendor" or "Internal" does
+   BlueTool first look for `/etc/bluetool/<HW model>.<boot|init>.script` (the HW model is D22AP) and then
+   `/etc/bluetool/<platform>.<...>.script`. So the userland's `libhakios.bluetool.dylib`
+   (`userland/src/inject_bluetool.c`), put into BlueTool alone, answers `ReleaseType` with "Vendor" and sends
+   `/etc/bluetool/` to the small image's `/redwood/etc/bluetool/`, where `D22AP.boot.script` and `D22AP.init.script`
+   (`userland/bluetool/`, ours) open the chip with `device -D -S` and ask its version (`hci info`). On the phone:
+   "_isVendorInstall = 1", "HW Model there is override script file /etc/bluetool/D22AP.boot.script", "Opening
+   com.apple.uart.bluetooth @ 4000000 baud.", "Radio Manufacturer: Broadcom ... LMP Subversion: 0x4309", "boot script
+   attempt 1 of 1: result 0", the same for init.
+3. **bluetoothd's transport.** `BT_HCI_TRANSPORT` is `TRANSPORT[:DRIVER[:ARGUMENT]]`. Its transports are USB, H4DS,
+   H4BC, H4, H5, APPLEBT, VIRT, PCIE and PCIESW; its drivers USB, POSIX, APPLEBT, VIRT, PCIE and PCIESW. With no driver
+   named it looks for one called like the transport, so `H4` alone ends in "FATAL ERROR - HCI Driver H4 could not be
+   matched", "Transport layer initialization failed" and the exit "Bluetooth fatal error - crashing { reason=102 }".
+   H4's driver is POSIX, and POSIX, too, opens a kernel control: the one named in the argument, `NAME,RATE`, by
+   default Apple's `com.apple.uart.sk.bluetooth` (Skywalk), which is not here. So the job has
+   `BT_HCI_TRANSPORT=H4:POSIX:com.apple.uart.bluetooth,4000000` (`userland/mkjobs.py`, set by `build.sh BT=1`), and
+   then: "bt: com.apple.uart.bluetooth: unit 1 gives way to pid ...", "Stack initialization complete",
+   "Stack: STACK_BUSY -> STACK_READY".
+4. **An address**, as before: a service named `marconi-bt` or `bluetooth` with `local-mac-address` (the kernel's
+   `hakios.bt_node.cpp`; "bluetooth: Got local-mac-address: 43:61:b2:00:1f:ac"). `bluetoothd` starts before bt=7 has
+   finished and exits with "Not a valid MAC address (all 00s)" until the service is there; launchd starts it again.
+
+`BT=1` (userland/build.sh) adds the jobs `com.apple.bluetoothd` and `com.apple.BlueTool`, the transport, the library
+and the scripts; without it the default image has no Bluetooth jobs, as before (`mkjobs.py`'s DENY still keeps
+`bluetooth` out of `REST=1`'s on-demand jobs). Their logs: `OSLOG="com.apple.bluetoothd com.apple.BlueTool"`.
+
+Not done: powering the chip from iOS. BlueTool's `power`, `reset` and `wake` commands go, on a UART, to
+`/dev/btpoweroff`, `/dev/btreset` and `/dev/btwake` (its strings), none of which exist here, and the scripts do not use
+them: the chip stays powered from bt=7 on, and turning the switch off in Settings has not been tried. Nor have pairing
+and audio.
 
 ## Before it ran: what iOS's Bluetooth would need (the plan, kept)
 
@@ -139,5 +174,6 @@ kernel's serial and power interfaces. What it would take, in order, and how sure
 
 Stages a to e on the phone (3 November 2026): the UART out of its USI reset and in loopback, the chip powered, HCI_Reset
 and its version, Broadcom's patch and the version after it, 4 Mbaud with RTS/CTS, and an inquiry and an LE scan from the
-USB console (`bt scan`). For iOS: the tty and the registry entry are there and `bluetoothd` stays up with the chip's
-address; BlueTool's boot is what it waits on (the section "iOS").
+USB console (`bt scan`). For iOS: BlueTool boots the chip through the kernel's `com.apple.uart.bluetooth` with this
+phone's own scripts, `bluetoothd`'s stack runs on the same control, and Settings > Bluetooth is on and scanning (the
+section "iOS"; userland `BT=1`).
