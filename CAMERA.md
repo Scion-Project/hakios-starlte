@@ -1,8 +1,11 @@
 # The Galaxy S9's cameras: what it takes, and the plan
 
-State: stages 1 to 3 written (`drivers/camera/hakios.exynos_camera.c`, `cam_s9=1` to `5`), and `camshot` over the USB
-console (`cam_s9=6`, below); none yet run on the phone.
-Stages 4 and 5 are a plan. Everything below comes from Samsung's BSP (android_kernel_samsung_exynos9810, lineage-24.0, e5906667; the
+State: the front camera works (`drivers/camera/hakios.exynos_camera.c`, run on the phone, 3 November): one picture
+on the USB console's `camshot` (`cam_s9=6`), auto-exposed to 18 % grey and demosaiced at the full 1632 x 1224; and a
+stream for iOS (`cam_s9=7`): 30.0 frames a second into a ring of four frames, `/dev/hakios-camera`, and **the stock
+Camera app's preview** through libhakios.media's capture device in mediaserverd (with `cam=5`, the loader's
+`/arm-io/isp` node that puts Camera.app on the home screen). Stage 5 (the rear camera) is a plan.
+Everything below comes from Samsung's BSP (android_kernel_samsung_exynos9810, lineage-24.0, e5906667; the
 device tree exynos9810-starlte_eur_open_26.dts in it), read for facts only (GPL-2.0, never copied).
 
 ## The hardware
@@ -97,16 +100,33 @@ _RESOL, _ENABLE), which proves the DMA without a sensor, as the POCO's `cam=3` u
    status and error code. On the host: `tools/usb-shot.py --cam -o cam.png`. The frame's buffer and the picture are
    physical memory at 0xD8000000 (8 MB), mapped once through IOKit (the WDMA's addresses are 32 bits and XNU has no
    memory below 4 GB on this phone). `cam_s9_bayer=0-3` and `cam_s9_stride=` correct the debayer's guesses.
-4. **/dev/hakios-camera.** `cam_s9=7` (the kernel's interface as `hakios.camera.c` gives it: open powers up, read
-   gives `struct hakios_camera_frame` with format 1 RAW10, `bayer`, `black` (64 in 10 bits, the usual for Samsung's sensors: to be measured), exposure
-   lines, line length, gain registers; write takes EXPOSURE, SENSOR, FOCUS). Frames by the CSIS's frame-end interrupt
-   and a ring of buffers (the WDMA has 8 frame pointers). `sensor` numbering follows the header: 2 the front, 1 the
-   wide. User space needs no change: mediaserverd takes the camera when `/dev/hakios-camera` exists (inject_media.c);
-   its colour tuning is looked for at `/redwood/fw/camera-<sensor>.isp` (camera_device.c) and is optional. Risk: low once 3 works. Effort: 1 week.
-   To check on the phone: whether the WDMA's RAW10 "normal" (not PACK12) layout is MIPI's (four pixels in five
-   bytes); if not, the header gets a second format and camera_isp.c a second unpacker. Step 4's log answers it: the
-   bytes written per line (2040 or 2048 for MIPI's layout, 2448 or more for PACK12), and `cam_s9_pack12=1` tries the
-   other one.
+4. **Done: the exposure, the stream and /dev/hakios-camera** (hackios-xnu-kernel, s9/cam-next).
+   *Exposure.* The meter: the green of every 16th 2 x 2 cell of the frame's middle half (about 1900 cells), the black
+   level (64) off; the aim 18 % of the range above it (172 of 959). The 3H1's registers (fimc-is-cis-3h1.c, facts
+   only): 0x0202 the coarse integration time in lines (2 to the frame's 1266 less 4: 33.2 ms at most at 30 frames a
+   second), 0x0204 the analog gain (0x20 = 1x; the sensor gives its range at 0x0084/0x0086: 0x20 to 0x200, 16x),
+   0x020E the digital gain (0x100 = 1x; capped at 4x, `cam_s9_dgain`), written under the grouped parameter hold
+   (0x0104). A change written after frame N's end shows in frame N + 3 (seen): the meter reads every third frame.
+   A camshot converges in 4 to 15 frames (`cam_s9_ae_frames`); the stream steps half-way every third frame.
+   In the dark room of the first runs it ends at 33 ms, 16x and 2.7-4x digital, the green at the aim.
+   *Ring.* The WDMA's eight frame pointers on four 4 MB slots at 0xD8000000 (32 MB to 0xD9FFFFFF, mapped through
+   IOMemoryDescriptor::withPhysicalAddress, never ml_io_map; UFS's own-mode memory starts at 0xDA000000). Seen: the
+   active frame pointer (ACT_CTRL [4:2]) read at a frame's end is the slot that frame went to.
+   *camshot.* A bilinear demosaic of the whole frame (N: every Nth pixel), grey-world white balance with each gain kept
+   within 1/4x and 4x of the green's (the room's warm light makes the raw red 2.8x the green), a saturation of 140 %
+   about the luminance (the GPL setfile A is register writes only: no colour matrix there; `setfile_3h1.bin`, the
+   ISP's tuning, is a vendor binary and not used), a gamma of about 1/2.2. 110-150 ms on the processor.
+   *Stream* (`cam_s9=7`): 30.0-30.1 frames a second over five minutes, no FIFO error, none lost but the two a camshot
+   takes; the thread polls the WDMA every millisecond (no interrupt wired yet). `/dev/hakios-camera` speaks the POCO's
+   protocol (bsd/sys/hakios.camera.h): format 1 MIPI RAW10 (packed in read() from the WDMA's 16 bits a pixel), GRBG,
+   black 64, the frame's number, time, exposure and gain; EXPOSURE taken while the reader keeps asking (the kernel's
+   auto-exposure back two seconds after), SENSOR taken (one camera: the frames carry the number asked for, so the back
+   and the front stream both get them), FOCUS ignored (no motor driven). camera_test reads it at 15 frames a second
+   (its read and unpack take 50-60 ms; the kernel's 30 are there). mediaserverd's capture device lists a Back Camera
+   and a Front Camera to AVFoundation, and Camera.app's preview runs from these frames (screenshot, run cn3-7).
+   Not yet: the CSIS's frame-end interrupt, powering the camera only while the device is open, a colour tuning file
+   for the 3H1 (`/redwood/fw/camera-<sensor>.isp`; the device loads the POCO's s5khm2sd tuning for "the Back Camera"
+   now), a sensor number of its own for the S9's front camera in camera_device.c.
 5. **The rear camera.** The same with the S2MPB03 (a new PMIC on hsi2c@14300000, its own read-only stage first),
    CSIS0 on four lanes, the AF motor (AK737x) for focus. OIS and the aperture left alone. Effort: 1-2 weeks.
 
@@ -129,6 +149,7 @@ phone (`/vendor/firmware/`), never into this repository.
 | C4 | `cam_s9=4` | "the buffer: 4194304 bytes at 0x...", "CSIS1 set up", "THE FRAME ENDED", "N bytes changed, the last at L (L/1224 a line)", "THE PATTERN REACHED MEMORY" |
 | C5 | `cam_s9=5` | after C4's lines: "read back: output 1632 x 1224, frame 1266 lines ...", "the sensor's frame count 0x.." (not 0xff), "frame end 1 ... 2", the CSIS's error bits 0, "THE PATCH ...: mean M" (64 or so with the lens covered, more in light), "A FRAME OF THE SENSOR'S IS IN MEMORY" |
 | C6 | `cam_s9=6 usb_gadget=5` | after C5's lines, "6: CAMSHOT READY"; then on the host `tools/usb-shot.py --cam -o cam.png`: "usb: camshot: asked of the camera", the camera's lines ("THE SENSOR ANSWERS", "frame end 1 ... 2"), "camshot: RAW10 GRBG at a stride of 2040 (or 2048)", "usb: camshot: the front camera, 816x612 RGB", "usb: camshot 1 sent", and cam.png; `--tp` the same with the test pattern |
+| C7 | `cam_s9=7 cam=5 usb_gadget=5` | "7: THE STREAM", "the ring: frame end 1, frame pointer 0 ... slot 0 by the fill", every ten seconds "the stream: frame N ..., 30.0 frames a second ..., 0 with the WDMA's FIFO error"; mediaserverd's "hakios: camera: the device made: two streams"; camera_avtest's two video devices; Camera.app's preview (tap its icon) and "hakios: camera: PrimaryScaler: the first picture given"; `tools/usb-shot.py --cam` takes the stream's newest frame |
 
 If C1 says the S2MPB02 does not answer, the flashlight's `torch=1` has the same bus: try it. If C2 says the sensor does
 not answer, run again with `cam_s9_ipclk=200` (the bus then runs at half speed if the clock is 400 MHz).
@@ -138,3 +159,51 @@ others' INT_SRC" say whether the generator fed another CSIS's DMA. If C5 gives "
 1023 everywhere, try `cam_s9_exp=` and `cam_s9_gain=`; if no frame end and the CSIS's SOT or CRC error bits are set,
 the settle is the suspect. If C6's picture has the right shapes and the wrong colours, try `cam_s9_bayer=` 0, 2 or 3;
 if it is sheared, `cam_s9_stride=` (the "bytes written" over 1224); a "camshot failed" line names the registers to read.
+
+## Stock iOS's camera, and how ours is presented to it
+
+Research from public sources (Apple's open-source XNU and IOKit headers, The Apple Wiki, Asahi Linux's documentation
+and apple-isp driver for the M1's ISP, the class and symbol names visible in iOS 16.5's shared cache), plus what this
+port's own runs show.
+
+**What iOS 16.5 runs.** The capture stack is CoreMedia's CMCapture (FigCapture): a server inside mediaserverd on iOS
+16 (cameracaptured, a daemon of its own, arrives with iOS 17), which AVFoundation's AVCaptureSession and Camera.app
+reach over XPC (FigCaptureSourceRemote, FigCaptureSessionRemote). In the server, BWFigCaptureDeviceVendor asks a
+platform plug-in for its capture device: on the iPhone X it is H10ISP.mediacapture
+(/System/Library/MediaCapture/), which makes a FigCaptureDevice with one FigCaptureStream per camera, each a
+CoreMedia "derived object" (a property table plus Start/Stop/AddAttachmentsToSampleBuffer). Under the plug-in is the
+kernel: AppleH10CamIn (the ISP's driver, an IOService on /arm-io/isp) and its user client, opened with
+IOServiceOpen; the ISP is an RTKit coprocessor running Apple's camera firmware, which the kernel loads and talks to
+through mailboxes and shared-memory command queues (Asahi's apple-isp documents the same family on the M1: firmware
+commands to power the sensor, set a channel's format, start a stream, hand over buffer pools). Frames come back as
+IOSurfaces from pools the plug-in registers, with per-frame metadata (exposure, gains, AF, face detection, the 3A's
+statistics) the firmware writes, and notifications on an IODataQueue/mach port. MobileGestalt reads
+IODeviceTree:/arm-io/isp and the camera nodes to decide that there is a camera at all (SpringBoard shows Camera.app by
+it); CoreMedia's colour conversions look for AppleM2ScalerCSCDriver (the M2 scaler) and fall back to software when it
+is missing ("IOServiceMatchingfailed for: AppleM2ScalerCSCDriver" in every run: harmless).
+
+**What Camera.app asked for, on this phone (run cn3-7).** Through libhakios.media's device: the vendor's device, one
+stream at a time (the back one first: SENSOR 1, then the front), MultipleOutputSupportEnabled, the outputs
+PrimaryScaler and StillImage (IntermediateTap, Raw, StillImageIntermediateTap, StillImageQuadra, StillImageRaw, Depth,
+PointCloud asked for and not there), format 0, Minimum/MaximumFrameRate 15/30, AEMaxGain 24576, ColorSpace 0,
+RegionOfInterestForCameraControls, Chroma/TemporalNoiseReduction, FaceDetection and HighCurrentTorch; the first
+picture given to PrimaryScaler at 1504x1128 420f, AddAttachmentsToSampleBuffer for the metadata. No IOKit camera
+service was opened: H10ISP.mediacapture is never asked, the vendor is ours.
+
+**Two ways to present our camera.**
+1. *A kernel-side AppleH10CamIn*: an IOService on /arm-io/isp with Apple's user client, so H10ISP.mediacapture runs
+   unchanged. It means emulating the ISP firmware's command protocol (well over a hundred commands, private and
+   per-firmware-version), its buffer-pool and metadata formats, the 3A the firmware runs (exposure, white balance,
+   focus statistics in Apple's layout), the sensor calibration it reads from the camera module's NVM, and the
+   checks H10ISP makes of the hardware (sensor IDs, the module's serials). Nothing of it is documented; Asahi's work
+   covers the M1's firmware interface partly, not the A11's, and not the user client above it. Effort: 4-8 months
+   of reverse engineering for one camera, fragile against every iOS update. Not recommended.
+2. *A user-space capture device* (what this port does, plug-and-play from the kernel's side): the kernel gives raw
+   frames on /dev/hakios-camera; libhakios.media, already loaded into mediaserverd for the POCO, replaces the
+   vendor's device with its own (camera_device.c: the same derived-object tables, the iPhone X's format names from
+   CMCapture's AVCaptureSession.plist so presets resolve) and makes pixel buffers on the CPU (camera_isp.c). Nothing
+   of iOS's own binaries changes on disk; the hook is the vendor's create function. On the S9 the kernel side was the
+   only missing part, and with it Camera.app's preview runs. Remaining effort: 1-2 weeks: a tuning file for the 3H1
+   (a colour matrix measured against a chart, lens shading), the S9's own sensor number in camera_device.c (front
+   only, no back camera until stage 5), the stills at full size, the preview's frame rate (the read-and-unpack path
+   is 50-60 ms a frame: an mmap of the ring or NV12 made in the kernel would halve it), power only while open.
