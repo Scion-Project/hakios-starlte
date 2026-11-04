@@ -294,7 +294,7 @@ devices/starlte/mkimage.sh -s 300 -n cpus=2 bootcpu=2 # only these arguments, no
 ```
 
 To install iOS on the phone's flash with one TWRP zip, build the system image too (`make images`), then use
-[scion-packaging](https://github.com/Scion-Project/scion-packaging)'s `starlte/mkinstaller.sh` (Storage, below).
+[scion-packaging](https://github.com/Scion-Project/scion-packaging)'s `build-installer.sh` (Storage, below).
 
 Samsung has no `fastboot boot`, and Silicium's UEFI has no USB gadget, so there is no resident loader to send runs to as
 on the POCO (the kernel's own USB link, below, gives the log and a console, not a way to send runs). Each run is an image, and the run returns to the loader by itself after `-s` seconds. The loader then keeps
@@ -406,8 +406,8 @@ The run's inputs: the kernel and packaging refs, the partition, and extra boot-a
 
 ## Storage: iOS from the phone's flash
 
-**The installer:** [Scion-Project/scion-packaging](https://github.com/Scion-Project/scion-packaging) `starlte/mkinstaller.sh`
-makes one TWRP zip. It writes the boot image (`-s 0`, `ufs=2 system_apfs=ufs_SYSTEM`) to BOOT and `userland/system.apfs`
+**The installer:** [Scion-Project/scion-packaging](https://github.com/Scion-Project/scion-packaging) `build-installer.sh`
+makes one TWRP zip for the S9, S9+ and Note9. On the S9 it writes the boot image (`-s 0`, `ufs=2 system_apfs=ufs_SYSTEM`) to BOOT and `userland/system.apfs`
 to SYSTEM, then checks both by SHA-256. On boot, init mounts the system image from `/dev/ufs_SYSTEM` and makes it the
 root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to SpringBoard (GICv2, 4 GB, a GPT
 partition read through the loader). The small root for it is built with `ALONE=1 RC=rc.launchd`.

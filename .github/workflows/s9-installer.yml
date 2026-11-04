@@ -4,7 +4,7 @@
 #   1. downloads iOS 16.5 (20F66) for iPhone10,3 from Apple's CDN, checked by size and hash;
 #   2. unpacks it (sysimage/unpack.sh) and builds the loader's iPhone identity (xnuloader/mkidentity.sh);
 #   3. builds the S9 kernel, the loader, Mesa, the small root (ALONE=1 RC=rc.launchd) and the system image;
-#   4. makes the installer (Scion-Project/scion-packaging starlte/mkinstaller.sh): Scion's boot image to BOOT,
+#   4. makes the installer (Scion-Project/scion-packaging universal/mkinstaller.sh): Scion's boot image to BOOT,
 #      the system image to the partition given (SYSTEM).
 #
 # The installer carries iOS's own files. This repository is public, and any signed-in GitHub user can download
@@ -68,7 +68,7 @@ jobs:
       - name: Host packages, and 7-Zip 24 (unpack.sh reads APFS with it; Ubuntu's p7zip is 16)
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q --no-install-recommends build-essential git curl clang lld \
+          sudo apt-get install -y -q --no-install-recommends build-essential git curl zstd clang lld \
             python3 python3-venv perl xz-utils flex bison m4 autoconf automake libtool-bin uuid-dev llvm \
             meson ninja-build pkg-config
           curl -L --fail --retry 3 -s "$SEVENZIP_URL" | tar -xJ -C "$W/bin" 7zz
@@ -188,7 +188,9 @@ jobs:
       - name: The small root and the system image (userland/build.sh; Mesa when the cache did not have it)
         working-directory: /mnt/w/k
         run: |
-          (source ./xnu-env.sh && cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 RC=rc.launchd BT=1 DEVICE=starlte bash build.sh) > "$W/userland.log" 2>&1 ||
+          # Sileo and the Procursus bootstrap, pinned by tools/mk-jb.sh; as scion-packaging's build-installer.sh does it
+          PREINSTALL= ELLEKIT= tools/mk-jb.sh > "$W/mk-jb.log" 2>&1 || { tail -40 "$W/mk-jb.log"; exit 1; }
+          (source ./xnu-env.sh && cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 RC=rc.launchd BT=1 DEVICE=starlte JB_KEPT_ONLY=1 bash build.sh) > "$W/userland.log" 2>&1 ||
             { tail -100 "$W/userland.log"; exit 1; }
           tail -5 "$W/userland.log"
           ls -la userland/root.apfs userland/system.apfs
