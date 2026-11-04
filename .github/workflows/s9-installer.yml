@@ -87,6 +87,8 @@ jobs:
           # this run's own commit of the device repository, where tools/hakios-device.py sync would put it
           git clone -q --filter=blob:none "https://github.com/$GITHUB_REPOSITORY.git" "$W/k/devices/starlte"
           git -C "$W/k/devices/starlte" checkout -q "$GITHUB_SHA"
+          # the S9+ and the Note9, at the revisions the kernel repository pins
+          (cd "$W/k" && python3 tools/hakios-device.py sync star2lte crownlte 2>&1 | tail -3 || true)
           for r in "$W/k" "$W/k/devices/starlte" "$W/pkg"; do echo "$r: $(git -C "$r" log --oneline -1)"; done
           echo "MESA_KEY=$(cd "$W/k" && cat tools/mk-mesa.sh tools/mesa/*.patch tools/mesa/hakios-drm/* | sha256sum | cut -c1-16)" >> "$GITHUB_ENV"
           echo "DEPS_KEY=$(sha256sum "$W/k/xnu-deps/setup.sh" | cut -c1-16)" >> "$GITHUB_ENV"
@@ -167,11 +169,17 @@ jobs:
         run: |
           # Wi-Fi is an object of its own, compiled against the kernel's tree: without it the kernel links and says nothing
           tools/mk-brcmfmac.sh > "$W/brcmfmac.log" 2>&1 || { tail -80 "$W/brcmfmac.log"; exit 1; }
-          make kernel JOBS=$(nproc) > "$W/kernel.log" 2>&1 || { tail -80 "$W/kernel.log"; exit 1; }
-          grep -aq 'lx: brcmfmac 2:' hakios-kernel || { echo "::error::the kernel has no Wi-Fi driver in it"; exit 1; }
-          K=xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
-          ls -la "$K" && grep -a 'drivers built in' "$W/kernel.log" | tail -1 || true
-          echo "KERNEL=$W/k/$K" >> "$GITHUB_ENV"
+          mkdir -p "$W/kernels"
+          for d in starlte star2lte crownlte; do
+            make ${d}_defconfig > /dev/null
+            rm -f hakios-kernel
+            make kernel JOBS=$(nproc) > "$W/kernel-$d.log" 2>&1 || { tail -80 "$W/kernel-$d.log"; exit 1; }
+            cp hakios-kernel "$W/kernels/kernel-$d"
+            grep -a 'drivers built in' "$W/kernel-$d.log" | tail -1 || true
+          done
+          grep -aq 'lx: brcmfmac 2:' "$W/kernels/kernel-starlte" || { echo "::error::the S9's kernel has no Wi-Fi driver in it"; exit 1; }
+          # the S9's configuration last, for mkimage.sh's defaults
+          make starlte_defconfig > /dev/null
 
       - name: The loader (with the identity)
         working-directory: /mnt/w/k
@@ -185,15 +193,16 @@ jobs:
           tail -5 "$W/userland.log"
           ls -la userland/root.apfs userland/system.apfs
 
-      - name: The installer (scion-packaging starlte/mkinstaller.sh)
+      - name: The installer (scion-packaging universal/mkinstaller.sh: S9, S9+, Note9)
         env:
           PARTITION: ${{ inputs.partition }}
           BOOT_ARGS: ${{ inputs.boot_args }}
           TIME_LIMIT: ${{ inputs.time_limit }}
         run: |
           mkdir -p "$W/out"
-          SCION_KERNEL="$W/k" "$W/pkg/starlte/mkinstaller.sh" -s "$W/k/userland/system.apfs" -k "$KERNEL" \
-            -r "$W/k/userland/root.apfs" -p "$PARTITION" -t "$TIME_LIMIT" -o "$W/out/scion-starlte-installer.zip" rtc_pmic= shub=6 bt=7 $BOOT_ARGS
+          SCION_KERNEL="$W/k" "$W/pkg/universal/mkinstaller.sh" -K "$W/k" -s "$W/k/userland/system.apfs" \
+            -k starlte="$W/kernels/kernel-starlte" -k star2lte="$W/kernels/kernel-star2lte" -k crownlte="$W/kernels/kernel-crownlte" \
+            -r "$W/k/userland/root.apfs" -p "$PARTITION" -a "starlte=shub=6 bt=7 $BOOT_ARGS" -o "$W/out/scion-exynos9810-installer.zip"
 
       - name: Encrypt it (the installer inside, untouched), and check the archive
         env:
@@ -202,26 +211,26 @@ jobs:
           TIME_LIMIT: ${{ inputs.time_limit }}
         run: |
           P="$W/pack" && mkdir -p "$P"
-          mv "$W/out/scion-starlte-installer.zip" "$P/"
-          (cd "$P" && sha256sum scion-starlte-installer.zip > SHA256SUMS)
+          mv "$W/out/scion-exynos9810-installer.zip" "$P/"
+          (cd "$P" && sha256sum scion-exynos9810-installer.zip > SHA256SUMS)
           cat > "$P/README.txt" <<EOF
           Scion for the Galaxy S9 (SM-G960F), built $(date -u +%Y-%m-%d) by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID
           kernel repo $(git -C "$W/k" rev-parse --short HEAD), device repo ${GITHUB_SHA::7}, system image to $PARTITION
 
-          1. Check the zip: sha256sum -c SHA256SUMS   (or compare with: shasum -a 256 scion-starlte-installer.zip)
+          1. Check the zip: sha256sum -c SHA256SUMS   (or compare with: shasum -a 256 scion-exynos9810-installer.zip)
           2. In TWRP, back up Boot, $PARTITION and EFS first and copy the backup off the phone.
-          3. Copy scion-starlte-installer.zip to the phone (or adb sideload it) and flash it: Install > the zip > swipe.
+          3. Copy scion-exynos9810-installer.zip to the phone (adb push or microSD: adb sideload cannot take a zip over 2 GB) and flash it: Install > the zip > swipe.
              Flash this zip as it is: do not unpack it.
           4. Reboot > System. To leave Scion: five fingers held on the screen for 1.5 s (back to TWRP), or Vol Down + Power.
           $([ "$TIME_LIMIT" = 0 ] || echo "   A test run: after $TIME_LIMIT s it restarts into TWRP by itself. Pull the log then (/sys/fs/pstore/pmsg-ramoops-0).")
           Android back: restore the Boot and $PARTITION backups in TWRP.
           EOF
-          A="$W/upload/scion-s9-installer.7z" && mkdir -p "$W/upload"
-          (cd "$P" && 7z a -t7z -mx=0 -mhe=on -p"$PASS" "$A" scion-starlte-installer.zip SHA256SUMS README.txt > /dev/null)
+          A="$W/upload/scion-exynos9810-installer.7z" && mkdir -p "$W/upload"
+          (cd "$P" && 7z a -t7z -mx=0 -mhe=on -p"$PASS" "$A" scion-exynos9810-installer.zip SHA256SUMS README.txt > /dev/null)
           # the archive opens with the passphrase, and the zip inside is the one made above
           7z t -p"$PASS" "$A" > /dev/null
           want=$(cut -d' ' -f1 "$P/SHA256SUMS")
-          got=$(7z x -so -p"$PASS" "$A" scion-starlte-installer.zip | sha256sum | cut -d' ' -f1)
+          got=$(7z x -so -p"$PASS" "$A" scion-exynos9810-installer.zip | sha256sum | cut -d' ' -f1)
           [ "$got" = "$want" ] || { echo "::error::the zip inside the archive is not the installer"; exit 1; }
           rm -rf "$P"
           ls -la "$A"
@@ -229,8 +238,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: scion-s9-installer
-          path: /mnt/w/upload/scion-s9-installer.7z
+          name: scion-exynos9810-installer
+          path: /mnt/w/upload/scion-exynos9810-installer.7z
           compression-level: 0
           retention-days: 3
 
