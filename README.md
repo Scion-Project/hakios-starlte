@@ -22,18 +22,24 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 - the display: the GPU through Mesa's Panfrost (`mali=9`, its clock after its load, `mali_gov=1`), the frame scaled by
   the DPP (`fb_dpp=1`) and scanned out of the window server's own surface with nothing copied (`fb_zc=1`), and iOS's
   brightness slider moving the panel (`backlight=2 brightness_bridge=1`);
+  the frame in the panel's own shape, 1125 x 2313 (375 x 771 points; `fb_native`, needs `libhakios.sb.dylib` from the kernel's
+  version), and XNU given the low RAM bank's free memory too, 3218 MB (`extra_ram`; Memory layout);
+- a passcode in Settings and on the lock screen, with iOS's delays (kernel `docs/passcode.md`; needs `passcoded` in the RAM
+  disk). No Secure Enclave: it gates the screen and encrypts nothing;
 - Wi-Fi: joined from iOS's Settings (WPA2), DHCP, the Internet (`wifi_pcie=6 brcmfmac=8 wifi=1`; WIFI.md);
 - the front camera in the stock Camera app at 30 frames a second (`cam_s9=7 cam=5`; CAMERA.md);
 - the speakers through ABOX and the two MAX98512s, iOS's own sounds (`abox=8 max98512=3`; AUDIO.md); the codec, a
   CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
 
 Seen working but not a default, for want of room on the line (Defaults): the sensors, the hub in the BCM4775 read at
-50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md); Bluetooth, the chip patched
-at 4 Mbaud and scanning from the USB console (`bt=7`, given for a run; BLUETOOTH.md); the codec's microphone as iOS's
+50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md); Bluetooth in iOS, Settings'
+switch through BlueTool and `bluetoothd`, and a paired device that stays connected (`bt=7`, given for a run, with
+`libhakios.bluetoothd.dylib`; BLUETOOTH.md); the codec's microphone as iOS's
 "iPhone Microphone" (`abox_mic=1`, given for a run; AUDIO.md, "The microphone in iOS").
 
-Not working yet: the headphones (written behind `cs47l93_hp=1`, not yet tried: AUDIO.md), Bluetooth in iOS
-(`bluetoothd` waits on BlueTool's boot: BLUETOOTH.md), the modem (docs/modem-plan.md) and the rear cameras. The
+Not working yet: the headphones (written behind `cs47l93_hp=1`, not yet tried: AUDIO.md), the modem
+(docs/modem-plan.md), the rear cameras, and the iris camera (`iris_s9=N`, off unless asked: the sensor answers, no frame
+reaches memory; CAMERA.md). The
 kernel's and loader's half is also tested in QEMU with the same interrupt controller (`qemu/run.sh` with `QEMU_GIC=2`).
 `device.conf` is the record of what is known and what is not, and the sections below give the detail.
 
