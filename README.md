@@ -28,6 +28,7 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
   disk). No Secure Enclave: it gates the screen and encrypts nothing;
 - Wi-Fi: joined from iOS's Settings (WPA2), DHCP, the Internet (`wifi_pcie=6 brcmfmac=8 wifi=1`; WIFI.md);
 - the front camera in the stock Camera app at 30 frames a second (`cam_s9=7 cam=5`; CAMERA.md);
+- hardware H.264 and HEVC through the MFC block for VideoToolbox (`mfc=5 mfc_irq=1`; 128 MB of RAM kept for it), Safari's video seen smooth (4 November);
 - the speakers through ABOX and the two MAX98512s, iOS's own sounds (`abox=8 max98512=3`; AUDIO.md); the codec, a
   CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
 
