@@ -193,7 +193,7 @@ jobs:
           tail -5 "$W/userland.log"
           ls -la userland/root.apfs userland/system.apfs
 
-      - name: The installer (scion-packaging universal/mkinstaller.sh: S9, S9+, Note9)
+      - name: The installer, S9, S9+ and Note9 (scion-packaging universal/mkinstaller.sh)
         env:
           PARTITION: ${{ inputs.partition }}
           BOOT_ARGS: ${{ inputs.boot_args }}
