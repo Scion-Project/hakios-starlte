@@ -11,20 +11,6 @@ os_profile = "ios-16.5-20F66"
 summary = "Samsung Galaxy S9 (SM-G960F, Exynos 9810) running iOS 16.5 on XNU through HakiOS. Upstream: based on HakiOS (Scion-Project/hackios-xnu-kernel, from oosexgang's HakiOS), not on the UniXNU tree; no UniXNU components are used. Seen on the phone 1-3 November 2026, and on by default on every image (configs/starlte.config, README.md, Defaults): six cores, touch, battery, haptics, USB console, the S6E3HA8 panel through the DPP's scaler with zero-copy scan-out, brightness slider, Mali-G72 through Mesa Panfrost, CPU DVFS governor with touch boost and TMU throttling, native UFS root and persistent /var, RTC, Wi-Fi joined from iOS's Settings with DHCP, the front camera in the stock Camera app at 30 fps, speaker audio through ABOX and the MAX98512s, the CS47L93 codec's main microphone recorded through ABOX. Seen working but not a default (no room on the line): the sensor hub's six sensors and iOS's orientation and proximity (shub=6, SENSORS.md); Bluetooth patched at 4 Mbaud with an LE scan from the USB console (bt=7, BLUETOOTH.md); the codec's microphone as iOS's (abox_mic=1, AUDIO.md). Not yet: headphones, Bluetooth in iOS, modem, rear cameras, core 1, the low RAM bank."
 
 [[area]]
-id = "upstream"
-status = "not-applicable"
-components = []
-paths = ["README.md", "LICENSE"]
-inputs = ["HakiOS: Apple's open-source XNU (xnu-8796.121.2) on Android phones, with its own loader (xnuloader) and drivers. The S9 port lives in Scion-Project/hackios-xnu-kernel (common tree, descended from oosexgang/hakios-xnu-kernel) and this repository (device files, checked out at devices/starlte)."]
-configuration = ["No UniXNU source pin, component, kit, OS profile or package script is used. board.toml lists no components and exists only so the catalog can identify the board."]
-procedure = ["Build and boot with the HakiOS tree as README.md (Build, On the phone) describes: make starlte_defconfig, make kernel, make loader, devices/starlte/mkimage.sh."]
-findings = ["This record follows UniXNU's porting-record format so the S9 can be listed; the port is not built on the UniXNU tree and shares no code with it."]
-completion = ["The catalog page links to this repository and states that the port is HakiOS-based."]
-limits = ["UniXNU's build, package and checker scripts do not build this board; its component IDs do not apply."]
-next_action = ["Keep this record in step with device.conf when an area's state changes."]
-evidence = []
-
-[[area]]
 id = "configuration"
 status = "implemented"
 components = []
@@ -46,6 +32,20 @@ result = "Per-subsystem status of the S9 port, with the boot-args that enable ea
 kind = "source"
 reference = "https://github.com/Scion-Project/hakios-starlte/blob/cf33958052eea2d50f0d6f8225ada7b8b3f2d9b8/configs/starlte.config"
 result = "The S9's kernel configuration fragment."
+
+[[area]]
+id = "upstream"
+status = "not-applicable"
+components = []
+paths = ["README.md", "LICENSE"]
+inputs = ["HakiOS: Apple's open-source XNU (xnu-8796.121.2) on Android phones, with its own loader (xnuloader) and drivers. The S9 port lives in Scion-Project/hackios-xnu-kernel (common tree, descended from oosexgang/hakios-xnu-kernel) and this repository (device files, checked out at devices/starlte)."]
+configuration = ["No UniXNU source pin, component, kit, OS profile or package script is used. board.toml lists no components and exists only so the catalog can identify the board."]
+procedure = ["Build and boot with the HakiOS tree as README.md (Build, On the phone) describes: make starlte_defconfig, make kernel, make loader, devices/starlte/mkimage.sh."]
+findings = ["This record follows UniXNU's porting-record format so the S9 can be listed; the port is not built on the UniXNU tree and shares no code with it."]
+completion = ["The catalog page links to this repository and states that the port is HakiOS-based."]
+limits = ["UniXNU's build, package and checker scripts do not build this board; its component IDs do not apply."]
+next_action = ["Keep this record in step with device.conf when an area's state changes."]
+evidence = []
 
 [[area]]
 id = "firmware"
