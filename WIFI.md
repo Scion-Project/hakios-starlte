@@ -230,6 +230,12 @@ base arguments are the daily image's (README.md); what each stage adds:
 | e. DHCP and ping | the same; the USB console's `ping` | configd's lease; replies | likely if d passes |
 | f. iOS's UI | the same, without `fw-wifi/network`: Settings, Wi-Fi on, a network chosen, its passphrase typed | the networks listed; the tick; the status bar's fan | likely if e passes (the same surface as the POCO) |
 
+The status bar's bars: wifid does not ask how strong the link is. It scales what Apple80211's RSSI event (39) says
+(`x = rssi + 77.5`, `x / (2 * sqrt(x * x + 450)) + 0.5`) and SpringBoard takes `ceil(3 * that)`, between 1 and 3: three bars
+above -70 dBm, two down to -85, one below. So while a network is joined `hakios.sta.c` measures every 5 s (`boundary_link_quality()`
+in `lx_cfg.c`: brcmfmac's `get_station()`) and posts the event when the RSSI has moved 2 dB, or after 30 s. In the log:
+`apple80211: the link as the radio hears it: N dBm`.
+
 Stages a to c go in one run, image `wifi-a` (`wifi_pcie=6 brcmfmac=7 brcmfmac_poll=1`, the files from the phone's
 VENDOR): every step says what it does before it does it, so the log shows where it stopped. `wifi-a-fw` is the same with
 `firmware/wifi/` and `firmware/bt/` in `fw/` and `wifi_vendor=0`, for when VENDOR is not read.
