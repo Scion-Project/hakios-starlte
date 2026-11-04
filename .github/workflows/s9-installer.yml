@@ -165,7 +165,10 @@ jobs:
       - name: The S9 kernel
         working-directory: /mnt/w/k
         run: |
+          # Wi-Fi is an object of its own, compiled against the kernel's tree: without it the kernel links and says nothing
+          tools/mk-brcmfmac.sh > "$W/brcmfmac.log" 2>&1 || { tail -80 "$W/brcmfmac.log"; exit 1; }
           make kernel JOBS=$(nproc) > "$W/kernel.log" 2>&1 || { tail -80 "$W/kernel.log"; exit 1; }
+          grep -aq 'lx: brcmfmac 2:' hakios-kernel || { echo "::error::the kernel has no Wi-Fi driver in it"; exit 1; }
           K=xnu-src/xnu-8796.121.2/BUILD/obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837
           ls -la "$K" && grep -a 'drivers built in' "$W/kernel.log" | tail -1 || true
           echo "KERNEL=$W/k/$K" >> "$GITHUB_ENV"
@@ -177,7 +180,7 @@ jobs:
       - name: The small root and the system image (userland/build.sh; Mesa when the cache did not have it)
         working-directory: /mnt/w/k
         run: |
-          (source ./xnu-env.sh && cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 RC=rc.launchd bash build.sh) > "$W/userland.log" 2>&1 ||
+          (source ./xnu-env.sh && cd userland && GL=1 NO_AIR=1 REST=1 ALONE=1 RC=rc.launchd BT=1 DEVICE=starlte bash build.sh) > "$W/userland.log" 2>&1 ||
             { tail -100 "$W/userland.log"; exit 1; }
           tail -5 "$W/userland.log"
           ls -la userland/root.apfs userland/system.apfs
@@ -190,7 +193,7 @@ jobs:
         run: |
           mkdir -p "$W/out"
           SCION_KERNEL="$W/k" "$W/pkg/starlte/mkinstaller.sh" -s "$W/k/userland/system.apfs" -k "$KERNEL" \
-            -r "$W/k/userland/root.apfs" -p "$PARTITION" -t "$TIME_LIMIT" -o "$W/out/scion-starlte-installer.zip" $BOOT_ARGS
+            -r "$W/k/userland/root.apfs" -p "$PARTITION" -t "$TIME_LIMIT" -o "$W/out/scion-starlte-installer.zip" rtc_pmic= shub=6 bt=7 $BOOT_ARGS
 
       - name: Encrypt it (the installer inside, untouched), and check the archive
         env:
