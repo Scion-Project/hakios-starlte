@@ -120,8 +120,7 @@ detection, the other microphones (IN4L, the headset's IN1BL).
 
 ## The microphone in iOS (3 November, phone 1)
 
-`abox_mic=1` with `abox=8 cs47l93=6`: iOS's input is the codec's main microphone (`abox_mic=1` is not one of the S9's
-defaults, whose line has no room left: give it for a run, README.md, Defaults). Nothing new in user space: the
+`abox_mic=1` with `abox=8 cs47l93=6`: iOS's input is the codec's main microphone (`abox_mic=1`, a default). Nothing new in user space: the
 audio server's plug-in (`userland/src/audio_plugin.c`, HakiosAudio.driver) has had a device "Codec" since the POCO's
 microphone, one 48 kHz 16-bit channel read from `/dev/hakios-mic`, of which iOS's virtual audio device makes the
 built-in microphone. What is new is the kernel's side:
