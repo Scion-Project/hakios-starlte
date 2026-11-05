@@ -33,9 +33,9 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
 - the speakers through ABOX and the two MAX98512s, iOS's own sounds (`abox=8 max98512=3`; AUDIO.md); the codec, a
   CS47L93 on SPI, with its main microphone recorded through ABOX on the USB console (`cs47l93=6`, `abox rec`; AUDIO.md).
 
-Seen working but not a default, for want of room on the line (Defaults): the sensors, the hub in the BCM4775 read at
-50 Hz and iOS's orientation and proximity from it (`shub=6`, given for a run; SENSORS.md); Bluetooth in iOS, Settings'
-switch through BlueTool and `bluetoothd`, and a paired device that stays connected (`bt=7`, given for a run, with
+Defaults once they were built in (Defaults): the sensors, the hub in the BCM4775 read at
+50 Hz and iOS's orientation and proximity from it (`shub=6`; SENSORS.md); Bluetooth in iOS, Settings'
+switch through BlueTool and `bluetoothd`, and a paired device that stays connected (`bt=7`, with
 `libhakios.bluetoothd.dylib`; BLUETOOTH.md); the codec's microphone as iOS's
 "iPhone Microphone" (`abox_mic=1`, given for a run; AUDIO.md, "The microphone in iOS").
 
@@ -330,14 +330,13 @@ Arguments given to `mkimage.sh` go over them, word by word: `name=value` replace
 stands, a name with no default is added, `name=` (nothing after the =) takes a default out, and `-n` leaves all of them
 out. The kernel, the loader and user space each take the first of two words with one name, so a default is replaced,
 never just followed. Diagnostics are never defaults: `fps_log`, `systrace`, the `*_probe`, `*_log` and `*_trace`
-arguments are given for a run. The defaults take 432 characters of the 607 the kernel's line holds; the loader adds
-about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`, `-v`), which leaves some 20 for a run's
-own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
+arguments are given for a run. What only the kernel reads is built into the kernel (`CONFIG_BUILTIN_ARGS`): given on the line, such an argument goes over its built-in
+value, and to turn one off give it as 0 (`name=` does that for you). The line itself holds about 140 characters of the 607, the loader adds
+about 110 and `mkimage.sh` about 45, and `mkimage.sh` warns when a line would not fit (the end of it would be cut). `-n` leaves out only what is on the line.
 A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
 `device.conf` and scion-installer's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
 SENSORS.md), Bluetooth (`bt=7`, BLUETOOTH.md) and the microphone in iOS (`abox_mic=1`, AUDIO.md) have been seen
-working but are not defaults: `shub=6` and `abox_mic=1` do not fit (432 + 7 and 432 + 11 are over the 437 the line
-leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the installer) for a run with them.
+working and are defaults.
 
 ## On the phone
 
@@ -779,7 +778,7 @@ none lost, the amplifiers on while they play). Nobody has listened yet: the proo
 and the amplifiers' registers ([AUDIO.md](AUDIO.md), with how to hear it). `abox` on the USB console says the state and `abox tone 3` plays the tone again (with `abox=7`).
 The codec, a CS47L93 on SPI (`cs47l93=6`, a default; `drivers/audio/hakios.cs47l93.c` on `drivers/core/hakios.exynos_spi.c`):
 its ID, power, FLL and main microphone, recorded through UAIF0 -> WDMA1 by the console's `abox rec S` (phone 1,
-3 November; [AUDIO.md](AUDIO.md), "The codec"); with `abox_mic=1` (not a default) it is iOS's microphone, through
+3 November; [AUDIO.md](AUDIO.md), "The codec"); with `abox_mic=1` it is iOS's microphone, through
 `/dev/hakios-mic` (AUDIO.md, "The microphone in iOS"). The headphones are written behind `cs47l93_hp=1`, not yet tried.
 
 ## Temperatures
