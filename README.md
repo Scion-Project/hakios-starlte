@@ -69,14 +69,15 @@ S-Boot (Samsung's, unlocked)  -->  boot image on BOOT      -->  HakiOS UEFI     
   UEFI image and the payload, **uncompressed and without a device tree** (Samsung's boot loader takes the device tree from
   the phone's own `dtb` partition and does not unpack a gzip), as Silicium's `starlte.toml` says.
 
-## The BSP: Scion-Project's forks
+## The BSP: ExyHyperBrick's trees
 
-The S9's drivers here are written afresh from the facts of Samsung's BSP (its LineageOS trees, by ExyHyperBrick),
-which Scion-Project keeps as forks so that what the drivers cite does not move. The kernel is GPL-2.0: it is read
+The S9's drivers here are written afresh from the facts of Samsung's BSP (its LineageOS trees, by ExyHyperBrick). Each
+tree is listed at the commit that was read. Scion-Project keeps a fork of the kernel, so that what the drivers cite
+does not move. The kernel is GPL-2.0: it is read
 for register addresses, fields and sequences, never copied into this kernel (APSL, `LICENSE` of the common repo).
 A driver's "Sources" comment names files of the kernel fork at the commit below.
 
-| Fork | Branch | Commit read |
+| Tree | Branch | Commit read |
 |---|---|---|
 | [`android_kernel_samsung_exynos9810`](https://github.com/Scion-Project/android_kernel_samsung_exynos9810) | `lineage-24.0` | `e5906667068e` |
 | [`android_device_samsung_starlte`](https://github.com/ExyHyperBrick/android_device_samsung_starlte) | `lineage-24.0` | `bdfc23b06e4d` |
