@@ -5,7 +5,7 @@ loader starts XNU. Nothing of Android's virtualization is involved (that is the 
 
 **The repository.** This is the S9's device repository: its configuration, its SoC layer (`soc/`), its UEFI platform and
 the UEFI built from it (`uefi/`, `prebuilt/`), and the image script. It is checked out at `devices/starlte` of the kernel's
-common repository, [Scion-Project/hackios-xnu-kernel](https://github.com/Scion-Project/hackios-xnu-kernel), which names it in
+common repository, [Scion-Project/scion-kernel](https://github.com/Scion-Project/scion-kernel), which names it in
 `devices/manifest.conf` at a revision (`tools/hakios-device.py sync starlte`). The S9's drivers are in the common
 repository, as the POCO's are: `drivers/core/hakios.exynos_hsi2c.c`, `drivers/input/hakios.exynos_keys.c` and
 `hakios.s6sy761.c`, `drivers/power/hakios.max77705.c`, `drivers/gpu/hakios.s6e3ha8.c` and `hakios.mali.c`/`.cpp`; and so
@@ -294,7 +294,7 @@ devices/starlte/mkimage.sh -s 300 -n cpus=2 bootcpu=2 # only these arguments, no
 ```
 
 To install iOS on the phone's flash with one TWRP zip, build the system image too (`make images`), then use
-[scion-packaging](https://github.com/Scion-Project/scion-packaging)'s `build-installer.sh` (Storage, below).
+[scion-installer](https://github.com/Scion-Project/scion-installer)'s `build-installer.sh` (Storage, below).
 
 Samsung has no `fastboot boot`, and Silicium's UEFI has no USB gadget, so there is no resident loader to send runs to as
 on the POCO (the kernel's own USB link, below, gives the log and a console, not a way to send runs). Each run is an image, and the run returns to the loader by itself after `-s` seconds. The loader then keeps
@@ -332,7 +332,7 @@ arguments are given for a run. The defaults take 432 characters of the 607 the k
 about 110 of its own and `mkimage.sh` about 45 (`loader_return_after=`, `epoch=`, `-v`), which leaves some 20 for a run's
 own, and `mkimage.sh` warns when a line would not fit (the end of it would be cut).
 A driver goes into the defaults once it has been seen working on the phone, in `configs/starlte.config`, and this list,
-`device.conf` and scion-packaging's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
+`device.conf` and scion-installer's installers (which give only `system_apfs=`) follow it. The sensors (`shub=6`,
 SENSORS.md), Bluetooth (`bt=7`, BLUETOOTH.md) and the microphone in iOS (`abox_mic=1`, AUDIO.md) have been seen
 working but are not defaults: `shub=6` and `abox_mic=1` do not fit (432 + 7 and 432 + 11 are over the 437 the line
 leaves) and `bt=7` would take its last 5. Give them to `mkimage.sh` (or the installer) for a run with them.
@@ -389,7 +389,7 @@ Actions > **s9-installer** > Run workflow (`.github/workflows/s9-installer.yml`)
 Ubuntu runner:
 1. It downloads iOS 16.5 (20F66) for iPhone10,3 from Apple's CDN, checked by size and hash, and unpacks it.
 2. It builds the S9 kernel, the loader with the iPhone identity, Mesa, the small root and the system image.
-3. It makes the TWRP installer (scion-packaging), with the system image going to SYSTEM unless the run says
+3. It makes the TWRP installer (scion-installer), with the system image going to SYSTEM unless the run says
    otherwise.
 
 The artifact `scion-s9-installer` is a 7z archive, AES-256 with its file names hidden. Its passphrase is the
@@ -406,7 +406,7 @@ The run's inputs: the kernel and packaging refs, the partition, and extra boot-a
 
 ## Storage: iOS from the phone's flash
 
-**The installer:** [Scion-Project/scion-packaging](https://github.com/Scion-Project/scion-packaging) `build-installer.sh`
+**The installer:** [Scion-Project/scion-installer](https://github.com/Scion-Project/scion-installer) `build-installer.sh`
 makes one TWRP zip for the S9, S9+ and Note9. On the S9 it writes the boot image (`-s 0`, `ufs=2 system_apfs=ufs_SYSTEM`) to BOOT and `userland/system.apfs`
 to SYSTEM, then checks both by SHA-256. On boot, init mounts the system image from `/dev/ufs_SYSTEM` and makes it the
 root, and the boot goes on as a RAM boot does. This is rehearsed in QEMU up to SpringBoard (GICv2, 4 GB, a GPT

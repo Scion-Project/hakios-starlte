@@ -1,5 +1,5 @@
 # The Galaxy S9's identity for UniXNU's device catalog (https://unixnu.com/porting/records).
-# This port is HakiOS, not a UniXNU build: it is built from Scion-Project/hackios-xnu-kernel
+# This port is HakiOS, not a UniXNU build: it is built from Scion-Project/scion-kernel
 # (descended from oosexgang's HakiOS) with this repository at devices/starlte, by that tree's
 # Makefile and mkxnuimg.py. UniXNU's scripts do not build this board, so this file carries only
 # what the catalog reads: the board's name, SoC, OS and an empty component list (no UniXNU

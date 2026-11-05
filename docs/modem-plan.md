@@ -17,7 +17,7 @@ Sources, read for facts only. No code from them goes into our repositories:
 |---|---|---|
 | GPL | `Scion-Project/android_kernel_samsung_exynos9810` (GPL-2.0) | `lineage-24.0` @ `e590666` |
 | DTS | GPL `arch/arm64/boot/dts/exynos/exynos9810-starlte_eur_open_26.dts` | same |
-| KERN | `Scion-Project/hackios-xnu-kernel` | `6be3ace` |
+| KERN | `Scion-Project/scion-kernel` | `6be3ace` |
 | lsi | Replicant `libsamsung-ipc` (GPL-2.0-or-later, see `samsung-ipc/ipc.c` header, `COPYING`) | `81a412c` (2023-09-20) |
 | FW | FirmWire (BSD-3-Clause), the Shannon emulator | `main` |
 | BT | seemoo-lab BaseTrace (GPL-3.0): iPhone QMI tooling, `libqmi-ios-ext` | `main` |

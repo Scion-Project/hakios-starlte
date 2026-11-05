@@ -100,7 +100,7 @@ _RESOL, _ENABLE), which proves the DMA without a sensor, as the POCO's `cam=3` u
    status and error code. On the host: `tools/usb-shot.py --cam -o cam.png`. The frame's buffer and the picture are
    physical memory at 0xD8000000 (8 MB), mapped once through IOKit (the WDMA's addresses are 32 bits and XNU has no
    memory below 4 GB on this phone). `cam_s9_bayer=0-3` and `cam_s9_stride=` correct the debayer's guesses.
-4. **Done: the exposure, the stream and /dev/hakios-camera** (hackios-xnu-kernel, s9/cam-next).
+4. **Done: the exposure, the stream and /dev/hakios-camera** (scion-kernel, s9/cam-next).
    *Exposure.* The meter: the green of every 16th 2 x 2 cell of the frame's middle half (about 1900 cells), the black
    level (64) off; the aim 18 % of the range above it (172 of 959). The 3H1's registers (fimc-is-cis-3h1.c, facts
    only): 0x0202 the coarse integration time in lines (2 to the frame's 1266 less 4: 33.2 ms at most at 30 frames a
