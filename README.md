@@ -3,7 +3,7 @@
 HakiOS on the Galaxy S9 the way it runs on the POCO: the phone's boot loader starts a UEFI, the UEFI starts `xnuloader`, the
 loader starts XNU. Nothing of Android's virtualization is involved (that is the Pixel's route, `avf/`).
 
-**The repository.** This is the S9's device repository: its configuration, its SoC layer (`soc/`), its UEFI platform and
+**The repository.** This is the S9's device repository: its configuration, its UEFI platform (the SoC's layer is the common repository's, `socs/exynos9810`) and
 the UEFI built from it (`uefi/`, `prebuilt/`), and the image script. It is checked out at `devices/starlte` of the kernel's
 common repository, [Scion-Project/scion-kernel](https://github.com/Scion-Project/scion-kernel), which names it in
 `devices/manifest.conf` at a revision (`tools/hakios-device.py sync starlte`). The S9's drivers are in the common
