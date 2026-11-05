@@ -22,10 +22,12 @@ docker run --rm -v /path/to/work:/work IMAGE bash -c 'cd /work/Mu-Silicium && py
 
 IMAGE has Silicium's packages (its `setup_env.sh`, apt) and a venv with `Mu-Silicium/pip-requirements.txt`.
 
-sha256: `SILICIUM_UEFI.fd` 5a46b859118fb325797d141ab492bb187bb23c605ddc44e449ade8d9b33f05cd,
+sha256: `SILICIUM_UEFI.fd` c5952455237a9588bf893c62a6953e49167ae6704331a06efebca45d6ff41fe7,
 `BootShim.bin` 7445cf6035702aa5b6f98bf20a931a296845f76d3e8334f23737df9395849035. The build is not yet proven
 reproducible byte for byte (no `SOURCE_DATE_EPOCH`).
 
 **Carbon Hypervisor.** The image carries `Silicon/Samsung/S5E9810Pkg/Include/Firmware/Hyp.bin` of that Silicium commit:
 Project Silicium's [Carbon Hypervisor](https://github.com/Project-Silicium/Carbon-Hypervisor), GPL-2.0, built by Silicium
 from that repository's source (its commit before 2026-10-09). It is the EL2 the kernel runs under, and answers PSCI.
+
+`SILICIUM_UEFI.fd` here is the build above with its three pictures (BootLogo, NoBootOS, MassStorage) replaced by Scion's in place: the LZMA firmware volume recompressed and the file's and section's sizes and header checksum set, nothing else changed (4 November 2026). A rebuild from `uefi/` brings hakios-uefi's `branding/banner.py` pictures back until that script draws Scion's.
