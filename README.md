@@ -25,7 +25,8 @@ are the GICv2, the loader's platform and the image packing (`mkxnuimg.py`).
   the frame in the panel's own shape, 1125 x 2313 (375 x 771 points; `fb_native`, needs `libhakios.sb.dylib` from the kernel's
   version), and XNU given the low RAM bank's free memory too, 3218 MB (`extra_ram`; Memory layout);
 - a passcode in Settings and on the lock screen, with iOS's delays (kernel `docs/passcode.md`; needs `passcoded` in the RAM
-  disk). No Secure Enclave: it gates the screen and encrypts nothing;
+  disk). No Secure Enclave: with the key store on by default (kernel `docs/keystore.md`) it protects keychain items, but no
+  files, and a 6-digit code falls to offline guessing by anyone who reads the flash;
 - Wi-Fi: joined from iOS's Settings (WPA2), DHCP, the Internet (`wifi_pcie=6 brcmfmac=8 wifi=1`; WIFI.md);
 - the front camera in the stock Camera app at 30 frames a second (`cam_s9=7 cam=5`; CAMERA.md);
 - hardware H.264 and HEVC through the MFC block for VideoToolbox (`mfc=5 mfc_irq=1`; 128 MB of RAM kept for it), Safari's video seen smooth (4 November);
