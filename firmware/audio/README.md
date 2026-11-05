@@ -5,8 +5,8 @@ Samsung's own binaries, kept here by the project's choice so that an image can b
 drivers find them (`hakios_image_file("fw", name)`).
 
 Taken unchanged from ExyHyperBrick's LineageOS vendor trees, branch `lineage-24.0`, `proprietary/vendor/firmware/`
-(the phone's `/vendor/firmware`): `proprietary_vendor_samsung_starlte` and, for `dsm.bin` and the codec's
-`cs47l92-dsp1-trace.wmfw`, `proprietary_vendor_samsung_exynos9810-common`. A phone's own copies can be checked against
+(the phone's `/vendor/firmware`): [`proprietary_vendor_samsung_starlte`](https://github.com/ExyHyperBrick/proprietary_vendor_samsung_starlte) and, for `dsm.bin` and the codec's
+`cs47l92-dsp1-trace.wmfw`, [`proprietary_vendor_samsung_exynos9810-common`](https://github.com/ExyHyperBrick/proprietary_vendor_samsung_exynos9810-common). A phone's own copies can be checked against
 the sums below (`adb shell sha256sum /vendor/firmware/<name>`).
 
 | file | what it is (the S9 kernel's names) | sha256 |

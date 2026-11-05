@@ -79,18 +79,18 @@ A driver's "Sources" comment names files of the kernel fork at the commit below.
 | Fork | Branch | Commit read |
 |---|---|---|
 | [`android_kernel_samsung_exynos9810`](https://github.com/Scion-Project/android_kernel_samsung_exynos9810) | `lineage-24.0` | `e5906667068e` |
-| [`android_device_samsung_starlte`](https://github.com/Scion-Project/android_device_samsung_starlte) | `lineage-24.0` | `bdfc23b06e4d` |
-| [`android_device_samsung_exynos9810-common`](https://github.com/Scion-Project/android_device_samsung_exynos9810-common) | `lineage-24.0` | `c386c0516b98` |
-| [`proprietary_vendor_samsung_starlte`](https://github.com/Scion-Project/proprietary_vendor_samsung_starlte) | `lineage-24.0` | `372082bbd32f` |
-| [`proprietary_vendor_samsung_exynos9810-common`](https://github.com/Scion-Project/proprietary_vendor_samsung_exynos9810-common) | `lineage-24.0` | `4884d8b2e4be` |
-| [`android_hardware_samsung_slsi`](https://github.com/Scion-Project/android_hardware_samsung_slsi) | `lineage-20-slsi` | `34f6c246e7fe` |
-| [`android_hardware_samsung_slsi_exynos`](https://github.com/Scion-Project/android_hardware_samsung_slsi_exynos) | `lineage-20-slsi` | `41256bda9dd8` |
-| [`android_hardware_samsung_slsi_exynos_dtbh`](https://github.com/Scion-Project/android_hardware_samsung_slsi_exynos_dtbh) | `lineage-23.2` | `c9bceb0d9b7e` |
-| [`android_hardware_samsung_slsi_graphics`](https://github.com/Scion-Project/android_hardware_samsung_slsi_graphics) | `lineage-20-slsi` | `e48c45d324c1` |
-| [`android_hardware_samsung_slsi_openmax`](https://github.com/Scion-Project/android_hardware_samsung_slsi_openmax) | `lineage-20-slsi` | `04b17f6f0470` |
-| [`android_hardware_samsung_slsi-linaro_config`](https://github.com/Scion-Project/android_hardware_samsung_slsi-linaro_config) | `lineage-21` | `bfe1bee06e1e` |
-| [`android_hardware_samsung_slsi-linaro_exynos`](https://github.com/Scion-Project/android_hardware_samsung_slsi-linaro_exynos) | `lineage-23.2` | `ab48fc5ba935` |
-| [`android_hardware_samsung_slsi-linaro_graphics`](https://github.com/Scion-Project/android_hardware_samsung_slsi-linaro_graphics) | `lineage-21` | `c7361ca484db` |
+| [`android_device_samsung_starlte`](https://github.com/ExyHyperBrick/android_device_samsung_starlte) | `lineage-24.0` | `bdfc23b06e4d` |
+| [`android_device_samsung_exynos9810-common`](https://github.com/ExyHyperBrick/android_device_samsung_exynos9810-common) | `lineage-24.0` | `c386c0516b98` |
+| [`proprietary_vendor_samsung_starlte`](https://github.com/ExyHyperBrick/proprietary_vendor_samsung_starlte) | `lineage-24.0` | `372082bbd32f` |
+| [`proprietary_vendor_samsung_exynos9810-common`](https://github.com/ExyHyperBrick/proprietary_vendor_samsung_exynos9810-common) | `lineage-24.0` | `4884d8b2e4be` |
+| [`android_hardware_samsung_slsi`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi) | `lineage-20-slsi` | `34f6c246e7fe` |
+| [`android_hardware_samsung_slsi_exynos`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi_exynos) | `lineage-20-slsi` | `41256bda9dd8` |
+| [`android_hardware_samsung_slsi_exynos_dtbh`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi_exynos_dtbh) | `lineage-23.2` | `c9bceb0d9b7e` |
+| [`android_hardware_samsung_slsi_graphics`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi_graphics) | `lineage-20-slsi` | `e48c45d324c1` |
+| [`android_hardware_samsung_slsi_openmax`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi_openmax) | `lineage-20-slsi` | `04b17f6f0470` |
+| [`android_hardware_samsung_slsi-linaro_config`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi-linaro_config) | `lineage-21` | `bfe1bee06e1e` |
+| [`android_hardware_samsung_slsi-linaro_exynos`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi-linaro_exynos) | `lineage-23.2` | `ab48fc5ba935` |
+| [`android_hardware_samsung_slsi-linaro_graphics`](https://github.com/ExyHyperBrick/android_hardware_samsung_slsi-linaro_graphics) | `lineage-21` | `c7361ca484db` |
 
 ## The hardware, and where each fact comes from
 
